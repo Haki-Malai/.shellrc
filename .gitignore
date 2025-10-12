@@ -1,0 +1,3 @@
+shell/rc/99-local.sh
+shell/rc/local.d/
+env/env.sh
