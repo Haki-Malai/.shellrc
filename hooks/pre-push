@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+read -r local_ref local_sha remote_ref remote_sha
+range="${remote_sha}..${local_sha}"; [ "$remote_sha" = "0000000000000000000000000000000000000000" ] && range="${local_sha}"
+if git diff --name-only "$range" -z | tr '\0' '\n' | grep -E '^(env/env\.sh|\.env(\.local)?|.*\.(pem|pfx|p12|key))$' >/dev/null; then
+  echo "Abort: env files or keys in push range." >&2; exit 1; fi
+if git diff -U0 "$range" | grep -E \
+ '(BEGIN (RSA|EC|OPENSSH) PRIVATE KEY|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|gh[pous]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|password\s*=|secret\s*=)' -q; then
+  echo "Abort: possible secrets detected in push range." >&2; exit 1; fi
