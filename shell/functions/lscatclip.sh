@@ -1,19 +1,18 @@
 # Concatenate matched files to clipboard; supports git mode or glob patterns
+[ -n "${ZSH_VERSION-}" ] && setopt local_options no_aliases
+unalias lscatclip 2>/dev/null || true
+unset -f lscatclip 2>/dev/null || true
+
 lscatclip() {
   local use_git=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" patterns=()
-
   while [ $# -gt 0 ]; do
     case "$1" in
       --git) use_git=1 ;;
       --glob) shift; [ -n "${1-}" ] || { echo "missing pattern for --glob" >&2; return 2; }; patterns+=("$1") ;;
       -n|--max-depth) shift; [[ "${1-}" =~ ^[0-9]+$ ]] && maxdepth="$1" ;;
-      -h|--help)
-        cat <<'USAGE'
+      -h|--help) cat <<'USAGE'
 Usage: lscatclip [--git] [--glob 'PATTERN' ...] [-n N|--max-depth N]
-  --git      Git-tracked files order; ignores depth.
-  --glob     Recursive glob pattern. Repeatable.
-  -n N       Limit recursion depth for --glob mode.
-Defaults: --glob '*.py' if none given.
+Defaults to --glob '*.py' if none given.
 USAGE
         return 0 ;;
       *) echo "unknown arg: $1" >&2; return 2 ;;
@@ -21,30 +20,27 @@ USAGE
   done
   [ ${#patterns[@]} -gt 0 ] || patterns=('*.py')
 
-  local list out f; list="$(mktemp)" || return 1
-  : >"$list"
+  local list out f; list="$(mktemp)" || return 1; : >"$list"
 
   if [ "$use_git" -eq 1 ]; then
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo" >&2; rm -f "$list"; return 1; }
-    git ls-files -z >"$list"
+    git ls-files >"$list"
   else
+    # BSD-safe newline-separated collection + dedup
     local pat
     for pat in "${patterns[@]}"; do
       if [ -n "$maxdepth" ]; then
         find . -maxdepth "$maxdepth" \
           \( -path './.git' -o -path '*/__pycache__' -o -path '*/.venv' -o -path '*/venv' \
              -o -path '*/node_modules' -o -path '*/.mypy_cache' -o -path '*/.pytest_cache' -o -path '*/.tox' \) -prune -o \
-          -type f -name "$pat" -print0 2>/dev/null | sort -z >>"$list"
+          -type f -name "$pat" -print 2>/dev/null
       else
         find . \
           \( -path './.git' -o -path '*/__pycache__' -o -path '*/.venv' -o -path '*/venv' \
              -o -path '*/node_modules' -o -path '*/.mypy_cache' -o -path '*/.pytest_cache' -o -path '*/.tox' \) -prune -o \
-          -type f -name "$pat" -print0 2>/dev/null | sort -z >>"$list"
+          -type f -name "$pat" -print 2>/dev/null
       fi
-    done
-    # de-dup
-    local tmp; tmp="$(mktemp)" || { rm -f "$list"; return 1; }
-    awk -v RS='\0' '!seen[$0]++ { printf "%s\0",$0 }' "$list" >"$tmp" && mv "$tmp" "$list"
+    done | LC_ALL=C sort -u >"$list"
   fi
 
   [ -s "$list" ] || { echo "no files matched" >&2; rm -f "$list"; return 1; }
@@ -52,7 +48,7 @@ USAGE
   out="$(mktemp)" || { rm -f "$list"; return 1; }
   {
     printf '%s\n' "=== $(pwd) ==="
-    while IFS= read -r -d '' f; do
+    while IFS= read -r f; do
       case "$f" in ./*) f="${f#./}";; esac
       if [ -f "$f" ] && grep -Iq . -- "$f"; then
         printf '%s\n' "----- $f -----"
