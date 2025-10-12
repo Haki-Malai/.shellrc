@@ -32,3 +32,13 @@ dots_diag() {
   command -v clip >/dev/null && echo "clip=$(type -p clip 2>/dev/null)"
 }
 
+_load_funcs() {
+  local base="$1"
+  [ -d "$base" ] || return 0
+  # zsh-safe, order-stable
+  while IFS= read -r -d '' f; do . "$f"; done < <(
+    find "$base" -maxdepth 2 -type f -name '*.sh' -print0 2>/dev/null | LC_ALL=C sort -z
+  )
+}
+_load_funcs "$DOTS_ROOT/shell/functions"
+
