@@ -16,3 +16,6 @@ if [ -n "${ZSH_VERSION-}" ]; then
   setopt HIST_IGNORE_DUPS
   setopt HIST_FIND_NO_DUPS
 fi
+
+# Default to emacs keybindings
+set -o emacs
