@@ -19,7 +19,7 @@ if [ -n "${ZSH_VERSION-}" ]; then
     _py_seg()     { [[ -n *.py(#qN) ]] || return; local v; v=$(python3 -V 2>/dev/null | awk "{print \$2}"); [[ -n $v ]] && printf "[%%F{226}%s%%f]-" "$v"; }
     _node_seg()   { [[ -n *.js*(#qN) ]] || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && printf "[%%F{46}%s%%f]-" "$v"; }
     _npm_seg()    { [[ -n *.js*(#qN) ]] || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && printf "[%%F{167}%s%%f]-" "$v"; }
-    PROMPT=$"%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-[%F{196}$(_ip_mask)%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f "
+    PROMPT=$'%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-[%F{196}$(_ip_mask)%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f '
   '
   return 0
 fi
