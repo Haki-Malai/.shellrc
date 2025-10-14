@@ -15,11 +15,11 @@ _ip_mask() {
   print -r -- "$ip" | sed -E 's/[18-9]/*/g'
 }
 _git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null }
-_venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && printf '[%F{226}%s%f]-' "${VIRTUAL_ENV:t}"; }
-_git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && printf '[%F{69}%s%f]-' "$b"; }
-_py_seg()     { local -a _py=( *.py(#qN) ); (( ${#_py} )) || return; local v; v=$(python3 -V 2>/dev/null | awk '{print $2}'); [[ -n $v ]] && printf '[%F{226}%s%f]-' "$v"; }
-_node_seg()   { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && printf '[%F{46}%s%f]-' "$v"; }
-_npm_seg()    { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && printf '[%F{167}%s%f]-' "$v"; }
+_venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && print -rn -- "[%F{226}${VIRTUAL_ENV:t}%f]-"; }
+_git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && print -rn -- "[%F{69}$b%f]-"; }
+_py_seg()     { local -a _py=( *.py(#qN) ); (( ${#_py} )) || return; local v; v=$(python3 -V 2>/dev/null | awk '{print $2}'); [[ -n $v ]] && print -rn -- "[%F{226}$v%f]-"; }
+_node_seg()   { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && print -rn -- "[%F{46}$v%f]-"; }
+_npm_seg()    { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && print -rn -- "[%F{167}$v%f]-"; }
 
 PROMPT=$'%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-[%F{196}$(_ip_mask)%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f '
 ZSH
