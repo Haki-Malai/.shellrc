@@ -4,13 +4,13 @@
 # Extend by exporting _SHELLRC_IGNORE_GLOBS before sourcing, if needed.
 if [ -z "${_SHELLRC_IGNORE_GLOBS+x}" ]; then
   _SHELLRC_IGNORE_GLOBS=(
-    .git .git/* */.git */.git/*
-    __pycache__ __pycache__/* */__pycache__ */__pycache__/*
-    .venv .venv/* venv venv/* */.venv */venv */venv/*
-    node_modules node_modules/* */node_modules */node_modules/*
-    .mypy_cache .mypy_cache/* */.mypy_cache */.mypy_cache/*
-    .pytest_cache .pytest_cache/* */.pytest_cache */.pytest_cache/*
-    .tox .tox/* */.tox */.tox/*
+    '.git' '.git/*' '*/.git' '*/.git/*'
+    '__pycache__' '__pycache__/*' '*/__pycache__' '*/__pycache__/*'
+    '.venv' '.venv/*' 'venv' 'venv/*' '*/.venv' '*/venv' '*/venv/*'
+    'node_modules' 'node_modules/*' '*/node_modules' '*/node_modules/*'
+    '.mypy_cache' '.mypy_cache/*' '*/.mypy_cache' '*/.mypy_cache/*'
+    '.pytest_cache' '.pytest_cache/*' '*/.pytest_cache' '*/.pytest_cache/*'
+    '.tox' '.tox/*' '*/.tox' '*/.tox/*'
   )
 fi
 
