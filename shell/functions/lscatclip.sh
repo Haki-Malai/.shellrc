@@ -2,6 +2,8 @@
 [ -n "${ZSH_VERSION-}" ] && setopt local_options no_aliases
 unalias lscatclip 2>/dev/null || true
 unset -f lscatclip 2>/dev/null || true
+# require shared ignore helpers (loaded by init.sh)
+type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
   local use_git=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth=""
@@ -53,7 +55,7 @@ USAGE
       *) echo "unknown arg: $1" >&2; return 2 ;;
     esac; shift
   done
-  [ ${#in_pats[@]} -gt 0 ] || in_pats=('*.py')
+  [ ${#in_pats[@]} -gt 0 ] || in_pats=('*')
 
   local list tmp f g rel
   list="$(mktemp)" || return 1
@@ -64,6 +66,7 @@ USAGE
     # newline-separated to avoid subshell issues
     while IFS= read -r f; do
       # filter by includes
+      _shellrc_should_ignore "$f" && continue
       if _matches_any "$f" "${in_pats[@]}"; then
         printf '%s\n' "$f" >>"$list"
       fi
@@ -72,14 +75,10 @@ USAGE
     # Collect with find per include pattern
     for g in "${in_pats[@]}"; do
       if [ -n "$maxdepth" ]; then
-        find . -maxdepth "$maxdepth" \
-          \( -path './.git' -o -path '*/__pycache__' -o -path '*/.venv' -o -path '*/venv' \
-             -o -path '*/node_modules' -o -path '*/.mypy_cache' -o -path '*/.pytest_cache' -o -path '*/.tox' \) -prune -o \
+        find . -maxdepth "$maxdepth" $(_shellrc_find_prune) \
           -type f -name "$g" -print 2>/dev/null
       else
-        find . \
-          \( -path './.git' -o -path '*/__pycache__' -o -path '*/.venv' -o -path '*/venv' \
-             -o -path '*/node_modules' -o -path '*/.mypy_cache' -o -path '*/.pytest_cache' -o -path '*/.tox' \) -prune -o \
+        find . $(_shellrc_find_prune) \
           -type f -name "$g" -print 2>/dev/null
       fi
     done | LC_ALL=C sort -u >"$list"
@@ -105,6 +104,7 @@ USAGE
     printf '%s\n' "=== $(pwd) ==="
     while IFS= read -r f; do
       case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
+      _shellrc_should_ignore "$rel" && continue
       if [ -f "$rel" ] && grep -Iq . -- "$rel"; then
         printf '%s\n' "----- $rel -----"
         cat -- "$rel"

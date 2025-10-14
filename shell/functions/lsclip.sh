@@ -2,6 +2,7 @@
 [ -n "${ZSH_VERSION-}" ] && setopt local_options no_aliases
 unalias lsclip 2>/dev/null || true
 unset -f lsclip 2>/dev/null || true
+type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lsclip() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo" >&2; return 1; }
@@ -23,9 +24,7 @@ lsclip() {
     printf '%s\n' "./"
     # newline-separated list avoids -z and subshell issues
     while IFS= read -r f; do
-      case "$f" in
-        .git/*|.git|.venv/*|.venv|venv/*|venv|node_modules/*|node_modules|__pycache__/*|__pycache__|.mypy_cache/*|.mypy_cache|.pytest_cache/*|.pytest_cache|.tox/*|.tox) continue;;
-      esac
+      _shellrc_should_ignore "$f" && continue
 
       # split path portable
       local last
