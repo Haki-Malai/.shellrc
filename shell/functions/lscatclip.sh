@@ -73,12 +73,13 @@ USAGE
     done < <(git ls-files)
   else
     # Collect with find per include pattern
+    _shellrc_find_prune_set
     for g in "${in_pats[@]}"; do
       if [ -n "$maxdepth" ]; then
-        find . -maxdepth "$maxdepth" $(_shellrc_find_prune) \
+        find , -maxepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
           -type f -name "$g" -print 2>/dev/null
       else
-        find . $(_shellrc_find_prune) \
+        find . "${_SHELLRC_PRUNE[@]}" \
           -type f -name "$g" -print 2>/dev/null
       fi
     done | LC_ALL=C sort -u >"$list"

@@ -24,9 +24,17 @@ _shellrc_should_ignore() {
 }
 
 # Find prune expression for directories
-_shellrc_find_prune() {
-  # emit tokens usable inline in find
-  printf '( '
-  printf '%s' '-path "./.git" -o -path "*/.git" -o -path "*/__pycache__" -o -path "*/.venv" -o -path "*/venv" -o -path "*/node_modules" -o -path "*/.mypy_cache" -o -path "*/.pytest_cache" -o -path "*/.tox"'
-  printf ' ) -prune -o'
+_shellrc_find_prune_set() {
+  [ -n "${ZSH_VERSION-}" ] && typeset -ga _SHELLRC_PRUNE || true
+  _SHELLRC_PRUNE=(
+    '('
+      -path "./.git" -o -path "*/.git" -o
+      -path "*/__pycache__" -o
+      -path "*/.venv" -o -path "*/venv" -o
+      -path "*/node_modules" -o
+      -path "*/.mypy_cache" -o
+      -path "*/.pytest_cache" -o
+      -path "*/.tox"
+    ')' -prune -o
+  )
 }
