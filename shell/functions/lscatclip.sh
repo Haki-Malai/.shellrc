@@ -117,7 +117,7 @@ USAGE
 
   # stats and copy
   read -r over_count max_len <<EOF
-$(awk -v m="$max_line_chars" '{l=length($0); if(l>m)c++; if(l>mx)mx=l} END{print (c?c:0), (mx?mx:0)}' "$out")
+$(LC_ALL=C awk -v m="$max_line_chars" '{l=length($0); if(l>m)c++; if(l>mx)mx=l} END{print (c?c:0), (mx?mx:0)}' "$out" 2>/dev/null)
 EOF
   clip <"$out" || { rm -f "$list" "$out"; return 1; }
   echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
