@@ -38,6 +38,8 @@ tests_suite_main() {
   run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip no matches" test_lscatclip_no_matches
+  run_test "lstype ranks lines" test_lstype_lines
+  run_test "lstype ranks bytes" test_lstype_bytes
   run_test "prompt includes cat" test_prompt_contains_cat
 
   printf '%s: %d run, %d failed\n' "${tests__shell:-unknown}" "$tests__run" "$tests__fail"
@@ -235,6 +237,49 @@ test_lscatclip_no_matches() {
   local status=$?
   rm -rf "$repo"
   [ "$status" -ne 0 ]
+}
+
+test_lstype_lines() {
+  local dir out_file output top_ext top_count
+  dir="$(make_tmp_dir)" || return 1
+  out_file="$dir/out.txt"
+  (
+    cd "$dir" || return 1
+    mkdir -p sub
+    printf 'a\nb\nc\nd\n' >sub/app.py
+    printf 'x\n' >one.txt
+    printf 'y\nz\n' >two.txt
+    lstype --limit 2 >"$out_file" || return 1
+  ) || { rm -rf "$dir"; return 1; }
+
+  output="$(cat "$out_file")"
+  printf '%s\n' "$output" | command grep -F -- '# top 2 file types by lines' >/dev/null || { rm -rf "$dir"; return 1; }
+  top_ext="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $2}')"
+  top_count="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $1}')"
+  [ "$top_ext" = ".py" ] || { rm -rf "$dir"; return 1; }
+  [ "$top_count" = "4" ] || { rm -rf "$dir"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- $'\t.txt' >/dev/null || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
+}
+
+test_lstype_bytes() {
+  local dir out_file output top_ext top_count
+  dir="$(make_tmp_dir)" || return 1
+  out_file="$dir/out.txt"
+  (
+    cd "$dir" || return 1
+    printf 'aaaaaa' >big.bin
+    printf 'bb' >small.txt
+    lstype --bytes --limit 1 >"$out_file" || return 1
+  ) || { rm -rf "$dir"; return 1; }
+
+  output="$(cat "$out_file")"
+  printf '%s\n' "$output" | command grep -F -- '# top 1 file types by bytes' >/dev/null || { rm -rf "$dir"; return 1; }
+  top_ext="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $2}')"
+  top_count="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $1}')"
+  [ "$top_ext" = ".bin" ] || { rm -rf "$dir"; return 1; }
+  [ "$top_count" = "6" ] || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
 }
 
 test_prompt_contains_cat() {
