@@ -76,7 +76,7 @@ USAGE
     _shellrc_find_prune_set
     for g in "${in_pats[@]}"; do
       if [ -n "$maxdepth" ]; then
-        find , -maxepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
+        find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
           -type f -name "$g" -print 2>/dev/null
       else
         find . "${_SHELLRC_PRUNE[@]}" \

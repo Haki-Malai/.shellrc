@@ -57,3 +57,13 @@ echo "$DOTS_OS"          # mac or linux
 type clip                # should resolve to pbcopy/wl-copy/xclip/xsel/clip.exe
 lscatclip -h             # helper usage
 gdc                      # copies staged diff to clipboard (if in a repo)
+
+## Tests
+
+Run the cross-shell test suite (bash + zsh):
+
+```bash
+./tests/run.sh
+```
+
+The harness stubs clipboard and network calls so it can run on both Linux and macOS.

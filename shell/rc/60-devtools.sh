@@ -1,7 +1,11 @@
 # NVM
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+fi
 
 # SDKMAN
 export SDKMAN_DIR="$HOME/.sdkman"
-[ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ] && . "$SDKMAN_DIR/bin/sdkman-init.sh"
+if [ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]; then
+  . "$SDKMAN_DIR/bin/sdkman-init.sh"
+fi
