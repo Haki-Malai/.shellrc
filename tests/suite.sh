@@ -35,6 +35,7 @@ tests_suite_main() {
   run_test "lsclip max depth" test_lsclip_max_depth
   run_test "lsclip rejects non-git" test_lsclip_non_git
   run_test "lscatclip git mode" test_lscatclip_git
+  run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "prompt includes cat" test_prompt_contains_cat
@@ -176,6 +177,27 @@ test_lscatclip_git() {
   printf '%s\n' "$output" | command grep -F -- "alpha" >/dev/null || return 1
   ! printf '%s\n' "$output" | command grep -Fq -- "skip.log" || return 1
   rm -rf "$repo"
+}
+
+test_lscatclip_tree() {
+  local dir
+  dir="$(make_tmp_dir)" || return 1
+  (
+    cd "$dir" || return 1
+    mkdir -p src/lib
+    printf 'root\n' >README.md
+    printf 'inner\n' >src/lib/file.ts
+    reset_clip_capture
+    lscatclip --glob '*.md' --glob '*.ts' --tree >/dev/null || return 1
+  ) || return 1
+
+  local output
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "=== FILE TREE: $dir ===" >/dev/null || return 1
+  printf '%s\n' "$output" | command grep -Fx -- "./" >/dev/null || return 1
+  printf '%s\n' "$output" | command grep -F -- "src/lib/" >/dev/null || return 1
+  printf '%s\n' "$output" | command grep -F -- "----- README.md -----" >/dev/null || return 1
+  rm -rf "$dir"
 }
 
 test_lscatclip_max_depth() {

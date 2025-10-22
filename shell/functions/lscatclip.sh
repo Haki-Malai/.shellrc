@@ -6,7 +6,7 @@ unset -f lscatclip 2>/dev/null || true
 type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
-  local use_git=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth=""
+  local use_git=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth=""
   local -a in_pats=() out_pats=()
 
   _append_csv_to_array() {
@@ -39,6 +39,7 @@ EOF
       --glob) shift; [ -n "${1-}" ] || { echo "missing pattern for --glob" >&2; return 2; }; in_pats+=("$1") ;;
       --in)   shift; [ -n "${1-}" ] || { echo "missing CSV for --in"  >&2; return 2; }; _append_csv_to_array "$1" in_pats ;;
       --out)  shift; [ -n "${1-}" ] || { echo "missing CSV for --out" >&2; return 2; }; _append_csv_to_array "$1" out_pats ;;
+      --tree) show_tree=1 ;;
       -n|--max-depth) shift; [[ "${1-}" =~ ^[0-9]+$ ]] && maxdepth="$1" ;;
       -h|--help)
         cat <<'USAGE'
@@ -57,7 +58,7 @@ USAGE
   done
   [ ${#in_pats[@]} -gt 0 ] || in_pats=('*')
 
-  local list tmp f g rel
+  local list tmp f g rel selected tree_depth
   list="$(mktemp)" || return 1
   : >"$list"
 
@@ -100,28 +101,53 @@ USAGE
 
   [ -s "$list" ] || { echo "no files matched" >&2; rm -f "$list"; return 1; }
 
-  local out; out="$(mktemp)" || { rm -f "$list"; return 1; }
+  selected="$(mktemp)" || { rm -f "$list"; return 1; }
+  while IFS= read -r f; do
+    case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
+    [ -n "$rel" ] || continue
+    _shellrc_should_ignore "$rel" && continue
+    if [ -f "$rel" ]; then
+      printf '%s\n' "$rel"
+    fi
+  done <"$list" >"$selected"
+
+  [ -s "$selected" ] || { echo "no files matched" >&2; rm -f "$list" "$selected"; return 1; }
+
+  tree_depth="$maxdepth"
+  if [ -z "$tree_depth" ] || [ "$use_git" -eq 1 ]; then
+    tree_depth=0
+  fi
+
+  local out; out="$(mktemp)" || { rm -f "$list" "$selected"; return 1; }
+  : >"$out"
+  if [ "$show_tree" -eq 1 ]; then
+    if ! _shellrc_render_tree "$selected" "$tree_depth" "$(pwd)" "FILE TREE" >"$out"; then
+      rm -f "$list" "$selected" "$out"
+      return 1
+    fi
+    printf '\n' >>"$out"
+  fi
+
   {
     printf '%s\n' "=== $(pwd) ==="
-    while IFS= read -r f; do
-      case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
-      _shellrc_should_ignore "$rel" && continue
-      if [ -f "$rel" ] && grep -Iq . -- "$rel"; then
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      if [ -f "$rel" ] && command grep -Iq . -- "$rel"; then
         printf '%s\n' "----- $rel -----"
         cat -- "$rel"
         printf '\n'
       elif [ -f "$rel" ]; then
         printf '%s\n\n' "----- $rel ----- [skipped binary]"
       fi
-    done <"$list"
-  } >"$out"
+    done <"$selected"
+  } >>"$out"
 
   # stats and copy
   read -r over_count max_len <<EOF
 $(LC_ALL=C awk -v m="$max_line_chars" '{l=length($0); if(l>m)c++; if(l>mx)mx=l} END{print (c?c:0), (mx?mx:0)}' "$out" 2>/dev/null)
 EOF
-  clip <"$out" || { rm -f "$list" "$out"; return 1; }
+  clip <"$out" || { rm -f "$list" "$selected" "$out"; return 1; }
   echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
   [ "$over_count" -gt 0 ] && echo "warning: $over_count lines exceed ${max_line_chars} (max $max_len)" >&2
-  rm -f "$list" "$out"
+  rm -f "$list" "$selected" "$out"
 }
