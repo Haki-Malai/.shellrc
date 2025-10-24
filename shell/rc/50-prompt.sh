@@ -9,11 +9,6 @@ autoload -U colors && colors
 setopt PROMPT_SUBST
 setopt EXTENDED_GLOB
 
-_ip_mask() {
-  local ip
-  ip=$(curl -fsS --max-time 1 icanhazip.com 2>/dev/null || print -r -- localhost)
-  print -r -- "$ip" | sed -E 's/[18-9]/*/g'
-}
 _git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null }
 _venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && print -rn -- "[%F{226}${VIRTUAL_ENV:t}%f]-"; }
 _git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && print -rn -- "[%F{69}$b%f]-"; }
@@ -21,7 +16,7 @@ _py_seg()     { local -a _py=( *.py(#qN) ); (( ${#_py} )) || return; local v; v=
 _node_seg()   { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && print -rn -- "[%F{46}$v%f]-"; }
 _npm_seg()    { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && print -rn -- "[%F{167}$v%f]-"; }
 
-PROMPT=$'%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-[%F{196}$(_ip_mask)%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f '
+PROMPT=$'%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f '
 ZSH
 )"
   return 0
