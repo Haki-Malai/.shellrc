@@ -9,14 +9,69 @@ autoload -U colors && colors
 setopt PROMPT_SUBST
 setopt EXTENDED_GLOB
 
+_ip_mask() {
+  local ip
+  ip=$(curl -fsS --max-time 1 icanhazip.com 2>/dev/null || print -r -- localhost)
+  print -r -- "$ip" | sed -E 's/[18-9]/*/g'
+}
 _git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null }
 _venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && print -rn -- "[%F{226}${VIRTUAL_ENV:t}%f]-"; }
 _git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && print -rn -- "[%F{69}$b%f]-"; }
 _py_seg()     { local -a _py=( *.py(#qN) ); (( ${#_py} )) || return; local v; v=$(python3 -V 2>/dev/null | awk '{print $2}'); [[ -n $v ]] && print -rn -- "[%F{226}$v%f]-"; }
 _node_seg()   { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && print -rn -- "[%F{46}$v%f]-"; }
 _npm_seg()    { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && print -rn -- "[%F{167}$v%f]-"; }
+_ip_seg()     { print -rn -- "[%F{196}$(_ip_mask)%f]-"; }
 
-PROMPT=$'%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-$(_git_seg)$(_py_seg)$(_node_seg)$(_npm_seg)[%F{70}%~%f]\n%F{250}└%f[%F{213}$%f]-%F{178}🐈%f '
+__visible_len() {
+  local expanded clean
+  expanded=$(print -P -- "$1")
+  clean=$(printf "%s" "$expanded" \
+    | sed -E $'s/\x1B\\[[0-9;]*[ -\\/]*[@-~]//g; s/\x1B\\][^\a]*\a//g')
+  print ${#clean}
+}
+
+: ${PROMPT_MAX:=$(( COLUMNS - 2 ))}
+
+_build_prompt() {
+  local show_ip=1 show_npm=1 show_node=1 show_py=1 first len
+
+  local prefix="%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-"
+  local suffix="[%F{70}%~%f]"
+  local middle all
+
+  local _assemble
+  _assemble() {
+    middle=""
+    (( show_ip   )) && middle+="$(_ip_seg)"
+    middle+="$(_git_seg)"
+    (( show_py   )) && middle+="$(_py_seg)"
+    (( show_node )) && middle+="$(_node_seg)"
+    (( show_npm  )) && middle+="$(_npm_seg)"
+    print -r -- "${prefix}${middle}${suffix}"
+  }
+
+  first=$(_assemble)
+  len=$(__visible_len "$first")
+
+  # drop in priority until within cap
+  while (( len > PROMPT_MAX )); do
+    if   (( show_ip   )); then show_ip=0
+    elif (( show_npm  )); then show_npm=0
+    elif (( show_node )); then show_node=0
+    elif (( show_py   )); then show_py=0
+    else break
+    fi
+    first=$(_assemble)
+    len=$(__visible_len "$first")
+  done
+
+  PROMPT="${first}"$'\n'"%F{250}└%f[%F{213}$%f]-%F{178}🐈%f "
+}
+
+precmd() { PROMPT_MAX=${PROMPT_MAX:-$(( COLUMNS - 2 ))}; _build_prompt }
+
+_build_prompt
+
 ZSH
 )"
   return 0
