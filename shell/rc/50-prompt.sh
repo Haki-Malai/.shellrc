@@ -93,7 +93,7 @@ if [ -n "${BASH_VERSION-}" ]; then
   time="["$lightBlue"\A"$white"]-"
   ip='['$color_red$((curl -s --max-time 1 icanhazip.com || echo localhost) | sed -E -e "s/[(1-3)(8-9)]/*/g")$white']-'
   node='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && node -v | awk '"'"'{print"\033[0m['$nodeGreen'"$1"\033[0m]-"}'"'"')'$white
-  npm='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && npm -v | awk '"'"'{print"\033[0m['$npmRed'"$1"\033[0m]-"}'"'"')'$white
+  npm='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && npm --loglevel=silent -v | awk '"'"'{print"\033[0m['$npmRed'"$1"\033[0m]-"}'"'"')'$white
   python='$(find -maxdepth 1 -type f -name "*.py" 2>/dev/null | grep -q . && python3 -V | awk '"'"'{print"\033[0m['$pythonYellow'"$2"\033[0m]-"}'"'"')'$white
   gitBranch='$(git branch 2>/dev/null | grep ^* | awk '"'"'{print"\033[0m['$gitColor'"$2"\033[0m]-"}'"'"')'$white
   workDir="["$lightGreen"\w"$white"]"
