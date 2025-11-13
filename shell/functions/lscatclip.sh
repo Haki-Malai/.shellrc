@@ -76,12 +76,33 @@ USAGE
     # Collect with find per include pattern
     _shellrc_find_prune_set
     for g in "${in_pats[@]}"; do
-      if [ -n "$maxdepth" ]; then
-        find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
-          -type f -name "$g" -print 2>/dev/null
+      if [[ "$g" == */* ]]; then
+        local path_pat="$g" pwd_prefix
+        case "$path_pat" in
+          ./*) ;;
+          /*)
+            pwd_prefix="$(pwd)/"
+            if [[ "$path_pat" == "$pwd_prefix"* ]]; then
+              path_pat="./${path_pat#$pwd_prefix}"
+            fi
+            ;;
+          *) path_pat="./$path_pat" ;;
+        esac
+        if [ -n "$maxdepth" ]; then
+          find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
+            -type f -path "$path_pat" -print 2>/dev/null
+        else
+          find . "${_SHELLRC_PRUNE[@]}" \
+            -type f -path "$path_pat" -print 2>/dev/null
+        fi
       else
-        find . "${_SHELLRC_PRUNE[@]}" \
-          -type f -name "$g" -print 2>/dev/null
+        if [ -n "$maxdepth" ]; then
+          find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
+            -type f -name "$g" -print 2>/dev/null
+        else
+          find . "${_SHELLRC_PRUNE[@]}" \
+            -type f -name "$g" -print 2>/dev/null
+        fi
       fi
     done | LC_ALL=C sort -u >"$list"
   fi
