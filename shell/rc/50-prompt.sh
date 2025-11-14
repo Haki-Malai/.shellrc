@@ -1,5 +1,34 @@
 # shell/rc/50-prompt.sh
 
+# Shared LAN IP helper (cached)
+_shellrc_lan_ip() {
+  if [ -n "${_SHELLRC_LAN_IP_CACHE-}" ]; then
+    printf '%s\n' "$_SHELLRC_LAN_IP_CACHE"
+    return 0
+  fi
+
+  local ip=""
+  case "${DOTS_OS:-}" in
+    mac)
+      if command -v ipconfig >/dev/null 2>&1; then
+        ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+      fi
+      ;;
+    linux)
+      if command -v ip >/dev/null 2>&1; then
+        ip=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / { sub("/.*","",$2); print $2; exit }')
+      fi
+      if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+      fi
+      ;;
+  esac
+
+  [ -n "$ip" ] || ip="127.0.0.1"
+  _SHELLRC_LAN_IP_CACHE="$ip"
+  printf '%s\n' "$_SHELLRC_LAN_IP_CACHE"
+}
+
 # ---------------------------
 # zsh prompt (native, pretty)
 # ---------------------------
@@ -9,17 +38,40 @@ autoload -U colors && colors
 setopt PROMPT_SUBST
 setopt EXTENDED_GLOB
 
+typeset -g _PY_VERSION_CACHE _NODE_VERSION_CACHE _NPM_VERSION_CACHE
+
 _ip_mask() {
   local ip
-  ip=$(curl -fsS --max-time 1 icanhazip.com 2>/dev/null || print -r -- localhost)
-  print -r -- "$ip" | sed -E 's/[18-9]/*/g'
+  ip="$(_shellrc_lan_ip 2>/dev/null || print -r -- "127.0.0.1")"
+  print -r -- "$ip"
 }
 _git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null }
 _venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && print -rn -- "[%F{226}${VIRTUAL_ENV:t}%f]-"; }
 _git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && print -rn -- "[%F{69}$b%f]-"; }
-_py_seg()     { local -a _py=( *.py(#qN) ); (( ${#_py} )) || return; local v; v=$(python3 -V 2>/dev/null | awk '{print $2}'); [[ -n $v ]] && print -rn -- "[%F{226}$v%f]-"; }
-_node_seg()   { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(node -v 2>/dev/null); [[ -n $v ]] && print -rn -- "[%F{46}$v%f]-"; }
-_npm_seg()    { local -a _js=( *.js*(#qN) ); (( ${#_js} )) || return; local v; v=$(npm -v 2>/dev/null);  [[ -n $v ]] && print -rn -- "[%F{167}$v%f]-"; }
+_py_seg() {
+  local -a _py=( *.py(#qN) )
+  (( ${#_py} )) || return
+  if [[ -z ${_PY_VERSION_CACHE-} ]]; then
+    _PY_VERSION_CACHE=$(python3 -V 2>/dev/null | awk '{print $2}')
+  fi
+  [[ -n $_PY_VERSION_CACHE ]] && print -rn -- "[%F{226}${_PY_VERSION_CACHE}%f]-"
+}
+_node_seg() {
+  local -a _js=( *.js*(#qN) )
+  (( ${#_js} )) || return
+  if [[ -z ${_NODE_VERSION_CACHE-} ]]; then
+    _NODE_VERSION_CACHE=$(node -v 2>/dev/null)
+  fi
+  [[ -n $_NODE_VERSION_CACHE ]] && print -rn -- "[%F{46}${_NODE_VERSION_CACHE}%f]-"
+}
+_npm_seg() {
+  local -a _js=( *.js*(#qN) )
+  (( ${#_js} )) || return
+  if [[ -z ${_NPM_VERSION_CACHE-} ]]; then
+    _NPM_VERSION_CACHE=$(npm -v 2>/dev/null)
+  fi
+  [[ -n $_NPM_VERSION_CACHE ]] && print -rn -- "[%F{167}${_NPM_VERSION_CACHE}%f]-"
+}
 _ip_seg()     { print -rn -- "[%F{196}$(_ip_mask)%f]-"; }
 
 __visible_len() {
@@ -91,7 +143,7 @@ if [ -n "${BASH_VERSION-}" ]; then
   usrPrompt="[\[\e[0;5;38;5;197m\]\$"$white"]-"
   [ ${EUID} != 0 ] && username="["$orange"\u"$white"]-"
   time="["$lightBlue"\A"$white"]-"
-  ip='['$color_red$((curl -s --max-time 1 icanhazip.com || echo localhost) | sed -E -e "s/[(1-3)(8-9)]/*/g")$white']-'
+  ip="[$color_red$(_shellrc_lan_ip)$white]-"
   node='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && node -v | awk '"'"'{print"\033[0m['$nodeGreen'"$1"\033[0m]-"}'"'"')'$white
   npm='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && npm --loglevel=silent -v | awk '"'"'{print"\033[0m['$npmRed'"$1"\033[0m]-"}'"'"')'$white
   python='$(find -maxdepth 1 -type f -name "*.py" 2>/dev/null | grep -q . && python3 -V | awk '"'"'{print"\033[0m['$pythonYellow'"$2"\033[0m]-"}'"'"')'$white
@@ -102,4 +154,3 @@ if [ -n "${BASH_VERSION-}" ]; then
   secondLine=$new_line$white$secondLineChar$usrPrompt"\[\e[0;33m\]🐈"$white
   PS1=$firstLine$secondLine
 fi
-
