@@ -1,6 +1,6 @@
 # pyenv path hints (Homebrew Intel/ARM)
-[ -x /opt/homebrew/bin/pyenv ] && PATH="/opt/homebrew/bin:$PATH"
-[ -x /usr/local/bin/pyenv ]   && PATH="/usr/local/bin:$PATH"
+[ -x /opt/homebrew/bin/pyenv ] && PATH="$PATH:/opt/homebrew/bin"
+[ -x /usr/local/bin/pyenv ]   && PATH="$PATH:/usr/local/bin"
 export PATH
 
 if command -v pyenv >/dev/null 2>&1; then
