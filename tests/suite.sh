@@ -39,6 +39,7 @@ tests_suite_main() {
   run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip dir arg" test_lscatclip_dir_arg
+  run_test "lscatclip --out excludes" test_lscatclip_out
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "lstype ranks lines" test_lstype_lines
   run_test "lstype ranks bytes" test_lstype_bytes
@@ -268,6 +269,26 @@ test_lscatclip_dir_arg() {
   printf '%s\n' "$output" | command grep -F -- "----- docs/readme.md -----" >/dev/null || { rm -rf "$base"; return 1; }
   ! printf '%s\n' "$output" | command grep -Fq -- "app.js" || { rm -rf "$base"; return 1; }
   rm -rf "$base"
+}
+
+test_lscatclip_out() {
+  local dir output
+  dir="$(make_tmp_dir)" || return 1
+  (
+    cd "$dir" || return 1
+    mkdir -p node_modules deep/node_modules
+    printf 'keep\n' >keep.js
+    printf 'dep\n' >node_modules/dep.js
+    printf 'nested\n' >deep/node_modules/inner.js
+    reset_clip_capture
+    lscatclip --glob '*.js' --out 'node_modules' >/dev/null || return 1
+  ) || { rm -rf "$dir"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "keep.js" >/dev/null || { rm -rf "$dir"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "dep.js" || { rm -rf "$dir"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "inner.js" || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
 }
 
 test_lscatclip_no_matches() {

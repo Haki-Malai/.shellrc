@@ -21,10 +21,14 @@ $(printf '%s' "$csv" | tr ',' '\n' | sed 's/^[[:space:]]\+//; s/[[:space:]]\+$//
 EOF
   }
   _match_glob() {
-    # path, pattern. If pattern has '/', match path, else basename.
+    # path, pattern. If pattern has '/', match path, else match path segments + basename.
     local p="$1" g="$2" base
     base="${p##*/}"
-    if [[ "$g" == */* ]]; then [[ "$p" == $g ]]; else [[ "$base" == $g ]]; fi
+    if [[ "$g" == */* ]]; then
+      [[ "$p" == $g ]]
+    else
+      [[ "$p" == $g ]] || [[ "$p" == */$g ]] || [[ "$p" == */$g/* ]] || [[ "$base" == $g ]]
+    fi
   }
   _matches_any() {
     # path, patterns...
