@@ -8,3 +8,5 @@ alias oc='opencommit'
 alias grep='grep --exclude-dir={__pycache__,node_modules,.git}'
 alias bb='[[ "$DOTS_OS" == mac ]] && sudo shutdown -h now || shutdown 0'
 alias bbr='[[ "$DOTS_OS" == mac ]] && sudo shutdown -r now || shutdown -r 0'
+alias python=python3
+alias pip=pip3

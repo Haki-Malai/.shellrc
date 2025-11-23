@@ -33,13 +33,16 @@ tests_suite_main() {
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
   run_test "lsclip max depth" test_lsclip_max_depth
+  run_test "lsclip dir arg" test_lsclip_dir_arg
   run_test "lsclip rejects non-git" test_lsclip_non_git
   run_test "lscatclip git mode" test_lscatclip_git
   run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
+  run_test "lscatclip dir arg" test_lscatclip_dir_arg
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "lstype ranks lines" test_lstype_lines
   run_test "lstype ranks bytes" test_lstype_bytes
+  run_test "lstype dir arg" test_lstype_dir_arg
   run_test "prompt includes cat" test_prompt_contains_cat
 
   printf '%s: %d run, %d failed\n' "${tests__shell:-unknown}" "$tests__run" "$tests__fail"
@@ -144,6 +147,32 @@ test_lsclip_max_depth() {
   rm -rf "$repo"
 }
 
+test_lsclip_dir_arg() {
+  local repo path output
+  repo="$(make_tmp_dir)" || return 1
+  path="$repo/project"
+  mkdir -p "$path/dir"
+  printf 'root\n' >"$path/root.txt"
+  printf 'inner\n' >"$path/dir/inner.txt"
+  (
+    cd "$repo" || return 1
+    (
+      cd "$path" || return 1
+      git init -q
+      git add root.txt dir/inner.txt
+    ) || return 1
+    reset_clip_capture
+    lsclip ./project >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "=== GIT TREE: $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "root.txt" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "dir/" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "inner.txt" >/dev/null || { rm -rf "$repo"; return 1; }
+  rm -rf "$repo"
+}
+
 test_lsclip_non_git() {
   local dir
   dir="$(make_tmp_dir)" || return 1
@@ -221,6 +250,26 @@ test_lscatclip_max_depth() {
   rm -rf "$dir"
 }
 
+test_lscatclip_dir_arg() {
+  local base target output
+  base="$(make_tmp_dir)" || return 1
+  target="$base/work"
+  mkdir -p "$target/docs" "$target/bin"
+  printf 'readme\n' >"$target/docs/readme.md"
+  printf 'ignore\n' >"$target/bin/app.js"
+  (
+    cd "$base" || return 1
+    reset_clip_capture
+    lscatclip --glob '*.md' ./work >/dev/null || return 1
+  ) || { rm -rf "$base"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "=== $target ===" >/dev/null || { rm -rf "$base"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "----- docs/readme.md -----" >/dev/null || { rm -rf "$base"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "app.js" || { rm -rf "$base"; return 1; }
+  rm -rf "$base"
+}
+
 test_lscatclip_no_matches() {
   local repo path
   repo="$(make_tmp_dir)" || return 1
@@ -280,6 +329,28 @@ test_lstype_bytes() {
   [ "$top_ext" = ".bin" ] || { rm -rf "$dir"; return 1; }
   [ "$top_count" = "6" ] || { rm -rf "$dir"; return 1; }
   rm -rf "$dir"
+}
+
+test_lstype_dir_arg() {
+  local base target out_file output top_ext top_count
+  base="$(make_tmp_dir)" || return 1
+  target="$base/proj"
+  out_file="$base/out.txt"
+  mkdir -p "$target/src"
+  printf 'one\ntwo\nthree\n' >"$target/src/app.js"
+  printf 'note\n' >"$target/notes.txt"
+  (
+    cd "$base" || return 1
+    lstype --limit 1 "$target" >"$out_file" || return 1
+  ) || { rm -rf "$base"; return 1; }
+
+  output="$(cat "$out_file")"
+  printf '%s\n' "$output" | command grep -F -- '# top 1 file types by lines' >/dev/null || { rm -rf "$base"; return 1; }
+  top_ext="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $2}')"
+  top_count="$(printf '%s\n' "$output" | awk -F'\t' 'NR==4 {print $1}')"
+  [ "$top_ext" = ".js" ] || { rm -rf "$base"; return 1; }
+  [ "$top_count" = "3" ] || { rm -rf "$base"; return 1; }
+  rm -rf "$base"
 }
 
 test_prompt_contains_cat() {

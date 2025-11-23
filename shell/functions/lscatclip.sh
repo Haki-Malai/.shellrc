@@ -6,8 +6,9 @@ unset -f lscatclip 2>/dev/null || true
 type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
-  local use_git=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth=""
+  local use_git=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
   local -a in_pats=() out_pats=()
+  local dir_set=0
 
   _append_csv_to_array() {
     # $1 = csv string, $2 = name of array to append to
@@ -41,9 +42,13 @@ EOF
       --out)  shift; [ -n "${1-}" ] || { echo "missing CSV for --out" >&2; return 2; }; _append_csv_to_array "$1" out_pats ;;
       --tree) show_tree=1 ;;
       -n|--max-depth) shift; [[ "${1-}" =~ ^[0-9]+$ ]] && maxdepth="$1" ;;
+      --)
+        shift
+        break
+        ;;
       -h|--help)
         cat <<'USAGE'
-Usage: lscatclip [--git] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-n N|--max-depth N]
+Usage: lscatclip [--git] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-n N|--max-depth N] [DIR]
 Aliases:
   --glob PATTERN  Add an include glob (alias of --in)
 Defaults:
@@ -53,122 +58,160 @@ Notes:
   - Excludes are applied after collection. Git mode ignores depth.
 USAGE
         return 0 ;;
-      *) echo "unknown arg: $1" >&2; return 2 ;;
+      -*)
+        echo "unknown arg: $1" >&2
+        return 2
+        ;;
+      *)
+        if [ "$dir_set" -eq 0 ]; then
+          target_dir="$1"
+          dir_set=1
+        else
+          echo "unknown arg: $1" >&2
+          return 2
+        fi
+        ;;
     esac; shift
   done
+  if [ $# -gt 0 ]; then
+    if [ "$dir_set" -eq 0 ]; then
+      target_dir="$1"
+      shift
+    else
+      echo "unknown arg: $1" >&2
+      return 2
+    fi
+  fi
+
+  if [ $# -gt 0 ]; then
+    echo "unknown arg: $1" >&2
+    return 2
+  fi
+
+  [ -d "$target_dir" ] || { echo "no such directory: $target_dir" >&2; return 1; }
   [ ${#in_pats[@]} -gt 0 ] || in_pats=('*')
 
-  local list tmp f g rel selected tree_depth
-  list="$(mktemp)" || return 1
-  : >"$list"
+  _lscatclip__run() {
+    local list tmp f g rel selected tree_depth
+    list="$(mktemp)" || return 1
+    : >"$list"
 
-  if [ "$use_git" -eq 1 ]; then
-    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo" >&2; rm -f "$list"; return 1; }
-    # newline-separated to avoid subshell issues
-    while IFS= read -r f; do
-      # filter by includes
-      _shellrc_should_ignore "$f" && continue
-      if _matches_any "$f" "${in_pats[@]}"; then
-        printf '%s\n' "$f" >>"$list"
-      fi
-    done < <(git ls-files)
-  else
-    # Collect with find per include pattern
-    _shellrc_find_prune_set
-    for g in "${in_pats[@]}"; do
-      if [[ "$g" == */* ]]; then
-        local path_pat="$g" pwd_prefix
-        case "$path_pat" in
-          ./*) ;;
-          /*)
-            pwd_prefix="$(pwd)/"
-            if [[ "$path_pat" == "$pwd_prefix"* ]]; then
-              path_pat="./${path_pat#$pwd_prefix}"
-            fi
-            ;;
-          *) path_pat="./$path_pat" ;;
-        esac
-        if [ -n "$maxdepth" ]; then
-          find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
-            -type f -path "$path_pat" -print 2>/dev/null
-        else
-          find . "${_SHELLRC_PRUNE[@]}" \
-            -type f -path "$path_pat" -print 2>/dev/null
+    if [ "$use_git" -eq 1 ]; then
+      git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo" >&2; rm -f "$list"; return 1; }
+      # newline-separated to avoid subshell issues
+      while IFS= read -r f; do
+        # filter by includes
+        _shellrc_should_ignore "$f" && continue
+        if _matches_any "$f" "${in_pats[@]}"; then
+          printf '%s\n' "$f" >>"$list"
         fi
-      else
-        if [ -n "$maxdepth" ]; then
-          find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
-            -type f -name "$g" -print 2>/dev/null
+      done < <(git ls-files)
+    else
+      # Collect with find per include pattern
+      _shellrc_find_prune_set
+      for g in "${in_pats[@]}"; do
+        if [[ "$g" == */* ]]; then
+          local path_pat="$g" pwd_prefix
+          case "$path_pat" in
+            ./*) ;;
+            /*)
+              pwd_prefix="$(pwd)/"
+              if [[ "$path_pat" == "$pwd_prefix"* ]]; then
+                path_pat="./${path_pat#$pwd_prefix}"
+              fi
+              ;;
+            *) path_pat="./$path_pat" ;;
+          esac
+          if [ -n "$maxdepth" ]; then
+            find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
+              -type f -path "$path_pat" -print 2>/dev/null
+          else
+            find . "${_SHELLRC_PRUNE[@]}" \
+              -type f -path "$path_pat" -print 2>/dev/null
+          fi
         else
-          find . "${_SHELLRC_PRUNE[@]}" \
-            -type f -name "$g" -print 2>/dev/null
+          if [ -n "$maxdepth" ]; then
+            find . -maxdepth "$maxdepth" "${_SHELLRC_PRUNE[@]}" \
+              -type f -name "$g" -print 2>/dev/null
+          else
+            find . "${_SHELLRC_PRUNE[@]}" \
+              -type f -name "$g" -print 2>/dev/null
+          fi
         fi
-      fi
-    done | LC_ALL=C sort -u >"$list"
-  fi
+      done | LC_ALL=C sort -u >"$list"
+    fi
 
-  # Apply excludes
-  if [ ${#out_pats[@]} -gt 0 ]; then
-    tmp="$(mktemp)" || { rm -f "$list"; return 1; }
+    # Apply excludes
+    if [ ${#out_pats[@]} -gt 0 ]; then
+      tmp="$(mktemp)" || { rm -f "$list"; return 1; }
+      while IFS= read -r f; do
+        rel="${f#./}"
+        if _matches_any "$rel" "${out_pats[@]}"; then
+          continue
+        fi
+        printf '%s\n' "$f"
+      done <"$list" >"$tmp"
+      mv "$tmp" "$list"
+    fi
+
+    [ -s "$list" ] || { echo "no files matched" >&2; rm -f "$list"; return 1; }
+
+    selected="$(mktemp)" || { rm -f "$list"; return 1; }
     while IFS= read -r f; do
-      rel="${f#./}"
-      if _matches_any "$rel" "${out_pats[@]}"; then
-        continue
-      fi
-      printf '%s\n' "$f"
-    done <"$list" >"$tmp"
-    mv "$tmp" "$list"
-  fi
-
-  [ -s "$list" ] || { echo "no files matched" >&2; rm -f "$list"; return 1; }
-
-  selected="$(mktemp)" || { rm -f "$list"; return 1; }
-  while IFS= read -r f; do
-    case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
-    [ -n "$rel" ] || continue
-    _shellrc_should_ignore "$rel" && continue
-    if [ -f "$rel" ]; then
-      printf '%s\n' "$rel"
-    fi
-  done <"$list" >"$selected"
-
-  [ -s "$selected" ] || { echo "no files matched" >&2; rm -f "$list" "$selected"; return 1; }
-
-  tree_depth="$maxdepth"
-  if [ -z "$tree_depth" ] || [ "$use_git" -eq 1 ]; then
-    tree_depth=0
-  fi
-
-  local out; out="$(mktemp)" || { rm -f "$list" "$selected"; return 1; }
-  : >"$out"
-  if [ "$show_tree" -eq 1 ]; then
-    if ! _shellrc_render_tree "$selected" "$tree_depth" "$(pwd)" "FILE TREE" >"$out"; then
-      rm -f "$list" "$selected" "$out"
-      return 1
-    fi
-    printf '\n' >>"$out"
-  fi
-
-  {
-    printf '%s\n' "=== $(pwd) ==="
-    while IFS= read -r rel; do
+      case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
       [ -n "$rel" ] || continue
-      if [ -f "$rel" ] && command grep -Iq . -- "$rel"; then
-        printf '%s\n' "----- $rel -----"
-        cat -- "$rel"
-        printf '\n'
-      elif [ -f "$rel" ]; then
-        printf '%s\n\n' "----- $rel ----- [skipped binary]"
+      _shellrc_should_ignore "$rel" && continue
+      if [ -f "$rel" ]; then
+        printf '%s\n' "$rel"
       fi
-    done <"$selected"
-  } >>"$out"
+    done <"$list" >"$selected"
 
-  # stats and copy
-  read -r over_count max_len <<EOF
+    [ -s "$selected" ] || { echo "no files matched" >&2; rm -f "$list" "$selected"; return 1; }
+
+    tree_depth="$maxdepth"
+    if [ -z "$tree_depth" ] || [ "$use_git" -eq 1 ]; then
+      tree_depth=0
+    fi
+
+    local out; out="$(mktemp)" || { rm -f "$list" "$selected"; return 1; }
+    : >"$out"
+    if [ "$show_tree" -eq 1 ]; then
+      if ! _shellrc_render_tree "$selected" "$tree_depth" "$(pwd)" "FILE TREE" >"$out"; then
+        rm -f "$list" "$selected" "$out"
+        return 1
+      fi
+      printf '\n' >>"$out"
+    fi
+
+    {
+      printf '%s\n' "=== $(pwd) ==="
+      while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        if [ -f "$rel" ] && command grep -Iq . -- "$rel"; then
+          printf '%s\n' "----- $rel -----"
+          cat -- "$rel"
+          printf '\n'
+        elif [ -f "$rel" ]; then
+          printf '%s\n\n' "----- $rel ----- [skipped binary]"
+        fi
+      done <"$selected"
+    } >>"$out"
+
+    # stats and copy
+    read -r over_count max_len <<EOF
 $(LC_ALL=C awk -v m="$max_line_chars" '{l=length($0); if(l>m)c++; if(l>mx)mx=l} END{print (c?c:0), (mx?mx:0)}' "$out" 2>/dev/null)
 EOF
-  clip <"$out" || { rm -f "$list" "$selected" "$out"; return 1; }
-  echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
-  [ "$over_count" -gt 0 ] && echo "warning: $over_count lines exceed ${max_line_chars} (max $max_len)" >&2
-  rm -f "$list" "$selected" "$out"
+    clip <"$out" || { rm -f "$list" "$selected" "$out"; return 1; }
+    echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
+    [ "$over_count" -gt 0 ] && echo "warning: $over_count lines exceed ${max_line_chars} (max $max_len)" >&2
+    rm -f "$list" "$selected" "$out"
+  }
+
+  (
+    cd "$target_dir" || exit 1
+    _lscatclip__run
+  )
+  local status=$?
+  unset -f _lscatclip__run 2>/dev/null || true
+  return $status
 }
