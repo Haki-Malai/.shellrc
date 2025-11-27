@@ -40,6 +40,7 @@ tests_suite_main() {
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip dir arg" test_lscatclip_dir_arg
   run_test "lscatclip --out excludes" test_lscatclip_out
+  run_test "lscatclip --includes content filter" test_lscatclip_includes
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "lstype ranks lines" test_lstype_lines
   run_test "lstype ranks bytes" test_lstype_bytes
@@ -288,6 +289,23 @@ test_lscatclip_out() {
   printf '%s\n' "$output" | command grep -F -- "keep.js" >/dev/null || { rm -rf "$dir"; return 1; }
   ! printf '%s\n' "$output" | command grep -Fq -- "dep.js" || { rm -rf "$dir"; return 1; }
   ! printf '%s\n' "$output" | command grep -Fq -- "inner.js" || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
+}
+
+test_lscatclip_includes() {
+  local dir output
+  dir="$(make_tmp_dir)" || return 1
+  (
+    cd "$dir" || return 1
+    printf 'keep special\n' >keep.txt
+    printf 'plain text\n' >skip.txt
+    reset_clip_capture
+    lscatclip --glob '*.txt' --includes 'special' >/dev/null || return 1
+  ) || { rm -rf "$dir"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "----- keep.txt -----" >/dev/null || { rm -rf "$dir"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "skip.txt" || { rm -rf "$dir"; return 1; }
   rm -rf "$dir"
 }
 

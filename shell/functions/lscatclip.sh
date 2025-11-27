@@ -7,7 +7,7 @@ type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
   local use_git=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
-  local -a in_pats=() out_pats=()
+  local -a in_pats=() out_pats=() include_terms=()
   local dir_set=0
 
   _append_csv_to_array() {
@@ -36,6 +36,17 @@ EOF
     for g in "$@"; do _match_glob "$p" "$g" && return 0; done
     return 1
   }
+  _file_contains_any() {
+    # file, needles...
+    local f="$1"; shift; local needle
+    [ -f "$f" ] || return 1
+    command grep -Iq . -- "$f" || return 1
+    for needle in "$@"; do
+      [ -n "$needle" ] || continue
+      command grep -Fq -e "$needle" -- "$f" && return 0
+    done
+    return 1
+  }
 
   # Parse args
   while [ $# -gt 0 ]; do
@@ -44,6 +55,7 @@ EOF
       --glob) shift; [ -n "${1-}" ] || { echo "missing pattern for --glob" >&2; return 2; }; in_pats+=("$1") ;;
       --in)   shift; [ -n "${1-}" ] || { echo "missing CSV for --in"  >&2; return 2; }; _append_csv_to_array "$1" in_pats ;;
       --out)  shift; [ -n "${1-}" ] || { echo "missing CSV for --out" >&2; return 2; }; _append_csv_to_array "$1" out_pats ;;
+      -i|--includes) shift; [ -n "${1-}" ] || { echo "missing CSV for --includes" >&2; return 2; }; _append_csv_to_array "$1" include_terms ;;
       --tree) show_tree=1 ;;
       -n|--max-depth) shift; [[ "${1-}" =~ ^[0-9]+$ ]] && maxdepth="$1" ;;
       --)
@@ -52,14 +64,15 @@ EOF
         ;;
       -h|--help)
         cat <<'USAGE'
-Usage: lscatclip [--git] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-n N|--max-depth N] [DIR]
+Usage: lscatclip [--git] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-i CSV|--includes CSV] [-n N|--max-depth N] [DIR]
 Aliases:
   --glob PATTERN  Add an include glob (alias of --in)
 Defaults:
-  If no includes given: --in '*.py'
+  If no globs given: --in '*'
 Notes:
   - Globs are shell-style, comma-separated. Quote them to avoid expansion.
   - Excludes are applied after collection. Git mode ignores depth.
+  - --includes filters to files whose contents contain any literal string in the CSV (binary files are skipped).
 USAGE
         return 0 ;;
       -*)
@@ -165,9 +178,11 @@ USAGE
       case "$f" in ./*) rel="${f#./}";; *) rel="$f";; esac
       [ -n "$rel" ] || continue
       _shellrc_should_ignore "$rel" && continue
-      if [ -f "$rel" ]; then
-        printf '%s\n' "$rel"
+      [ -f "$rel" ] || continue
+      if [ ${#include_terms[@]} -gt 0 ]; then
+        _file_contains_any "$rel" "${include_terms[@]}" || continue
       fi
+      printf '%s\n' "$rel"
     done <"$list" >"$selected"
 
     [ -s "$selected" ] || { echo "no files matched" >&2; rm -f "$list" "$selected"; return 1; }
