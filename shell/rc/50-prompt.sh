@@ -120,7 +120,11 @@ _build_prompt() {
   PROMPT="${first}"$'\n'"%F{250}└%f[%F{213}$%f]-%F{178}🐈%f "
 }
 
-precmd() { PROMPT_MAX=${PROMPT_MAX:-$(( COLUMNS - 2 ))}; _build_prompt }
+precmd() {
+  unset _PY_VERSION_CACHE 2>/dev/null || true
+  PROMPT_MAX=${PROMPT_MAX:-$(( COLUMNS - 2 ))}
+  _build_prompt
+}
 
 _build_prompt
 
