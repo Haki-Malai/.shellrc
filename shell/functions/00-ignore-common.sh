@@ -18,7 +18,11 @@ fi
 _shellrc_should_ignore() {
   local p="$1" g
   for g in "${_SHELLRC_IGNORE_GLOBS[@]}"; do
-    [[ "$p" == $g ]] && return 0
+    if [ -n "${ZSH_VERSION-}" ]; then
+      [[ "$p" == ${~g} ]] && return 0
+    else
+      [[ "$p" == $g ]] && return 0
+    fi
   done
   return 1
 }

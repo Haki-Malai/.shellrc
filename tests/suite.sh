@@ -36,6 +36,8 @@ tests_suite_main() {
   run_test "lsclip dir arg" test_lsclip_dir_arg
   run_test "lsclip rejects non-git" test_lsclip_non_git
   run_test "lscatclip git mode" test_lscatclip_git
+  run_test "lscatclip diff mode" test_lscatclip_diff
+  run_test "lscatclip diff rejects main" test_lscatclip_diff_rejects_main
   run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip dir arg" test_lscatclip_dir_arg
@@ -210,6 +212,57 @@ test_lscatclip_git() {
   printf '%s\n' "$output" | command grep -F -- "alpha" >/dev/null || return 1
   ! printf '%s\n' "$output" | command grep -Fq -- "skip.log" || return 1
   rm -rf "$repo"
+}
+
+test_lscatclip_diff() {
+  local repo path output
+  repo="$(make_tmp_dir)" || return 1
+  path="$repo/project"
+  mkdir -p "$path"
+  printf 'base\n' >"$path/base.txt"
+  (
+    cd "$path" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    git checkout -b feature -q
+    printf 'change\n' >>"$path/base.txt"
+    printf 'new\n' >"$path/new.txt"
+    git add new.txt
+    reset_clip_capture
+    lscatclip --diff --in '*.txt' >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "----- base.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "----- new.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
+  rm -rf "$repo"
+}
+
+test_lscatclip_diff_rejects_main() {
+  local repo path
+  repo="$(make_tmp_dir)" || return 1
+  path="$repo/project"
+  mkdir -p "$path"
+  printf 'base\n' >"$path/base.txt"
+  (
+    cd "$path" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    reset_clip_capture
+    lscatclip --diff --in '*.txt' >/dev/null 2>&1
+  )
+  local status=$?
+  rm -rf "$repo"
+  [ "$status" -ne 0 ]
 }
 
 test_lscatclip_tree() {

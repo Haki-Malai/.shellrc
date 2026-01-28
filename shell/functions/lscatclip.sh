@@ -6,7 +6,7 @@ unset -f lscatclip 2>/dev/null || true
 type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
-  local use_git=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
+  local use_git=0 use_diff=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
   local -a in_pats=() out_pats=() include_terms=()
   local dir_set=0
 
@@ -25,9 +25,17 @@ EOF
     local p="$1" g="$2" base
     base="${p##*/}"
     if [[ "$g" == */* ]]; then
-      [[ "$p" == $g ]]
+      if [ -n "${ZSH_VERSION-}" ]; then
+        [[ "$p" == ${~g} ]]
+      else
+        [[ "$p" == $g ]]
+      fi
     else
-      [[ "$p" == $g ]] || [[ "$p" == */$g ]] || [[ "$p" == */$g/* ]] || [[ "$base" == $g ]]
+      if [ -n "${ZSH_VERSION-}" ]; then
+        [[ "$p" == ${~g} ]] || [[ "$p" == */${~g} ]] || [[ "$p" == */${~g}/* ]] || [[ "$base" == ${~g} ]]
+      else
+        [[ "$p" == $g ]] || [[ "$p" == */$g ]] || [[ "$p" == */$g/* ]] || [[ "$base" == $g ]]
+      fi
     fi
   }
   _matches_any() {
@@ -52,6 +60,7 @@ EOF
   while [ $# -gt 0 ]; do
     case "$1" in
       --git) use_git=1 ;;
+      --diff) use_git=1; use_diff=1 ;;
       --glob) shift; [ -n "${1-}" ] || { echo "missing pattern for --glob" >&2; return 2; }; in_pats+=("$1") ;;
       --in)   shift; [ -n "${1-}" ] || { echo "missing CSV for --in"  >&2; return 2; }; _append_csv_to_array "$1" in_pats ;;
       --out)  shift; [ -n "${1-}" ] || { echo "missing CSV for --out" >&2; return 2; }; _append_csv_to_array "$1" out_pats ;;
@@ -64,7 +73,7 @@ EOF
         ;;
       -h|--help)
         cat <<'USAGE'
-Usage: lscatclip [--git] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-i CSV|--includes CSV] [-n N|--max-depth N] [DIR]
+Usage: lscatclip [--git] [--diff] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-i CSV|--includes CSV] [-n N|--max-depth N] [DIR]
 Aliases:
   --glob PATTERN  Add an include glob (alias of --in)
 Defaults:
@@ -72,6 +81,7 @@ Defaults:
 Notes:
   - Globs are shell-style, comma-separated. Quote them to avoid expansion.
   - Excludes are applied after collection. Git mode ignores depth.
+  - --diff copies files changed in `git diff main` (errors on main branch).
   - --includes filters to files whose contents contain any literal string in the CSV (binary files are skipped).
 USAGE
         return 0 ;;
@@ -109,20 +119,61 @@ USAGE
   [ ${#in_pats[@]} -gt 0 ] || in_pats=('*')
 
   _lscatclip__run() {
-    local list tmp f g rel selected tree_depth
+    local list tmp f g rel selected tree_depth debug
+    debug="${LSCATCLIP_DEBUG:-0}"
     list="$(mktemp)" || return 1
     : >"$list"
 
     if [ "$use_git" -eq 1 ]; then
       git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo" >&2; rm -f "$list"; return 1; }
-      # newline-separated to avoid subshell issues
-      while IFS= read -r f; do
-        # filter by includes
-        _shellrc_should_ignore "$f" && continue
-        if _matches_any "$f" "${in_pats[@]}"; then
-          printf '%s\n' "$f" >>"$list"
+      local repo_root cwd_abs cwd_rel
+      repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+      cwd_abs="$(pwd)"
+      if [[ "$cwd_abs" == "$repo_root" ]]; then
+        cwd_rel=""
+      else
+        cwd_rel="${cwd_abs#"$repo_root"/}"
+      fi
+      if [ "$use_diff" -eq 1 ]; then
+        local branch
+        branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        if [ "$branch" = "main" ]; then
+          echo "cannot use --diff on main branch" >&2
+          rm -f "$list"
+          return 1
         fi
-      done < <(git ls-files)
+        git rev-parse --verify main >/dev/null 2>&1 || { echo "no main branch" >&2; rm -f "$list"; return 1; }
+        # newline-separated to avoid subshell issues
+        while IFS= read -r f; do
+          [ "$debug" -eq 1 ] && echo "diff path: [$f]" >&2
+          [ -n "$f" ] || continue
+          case "$f" in ./*) f="${f#./}";; esac
+          if [ -n "$cwd_rel" ] && [[ "$f" == "$cwd_rel/"* ]]; then
+            f="${f#$cwd_rel/}"
+          fi
+          # filter by includes
+          _shellrc_should_ignore "$f" && continue
+          if _matches_any "$f" "${in_pats[@]}"; then
+            printf '%s\n' "$f" >>"$list"
+          fi
+        done < <(git diff --name-only --relative main -- .)
+      else
+        # newline-separated to avoid subshell issues
+        while IFS= read -r f; do
+          [ "$debug" -eq 1 ] && echo "ls path: [$f]" >&2
+          [ -n "$f" ] || continue
+          case "$f" in ./*) f="${f#./}";; esac
+          if [ -n "$cwd_rel" ] && [[ "$f" == "$cwd_rel/"* ]]; then
+            f="${f#$cwd_rel/}"
+          fi
+          # filter by includes
+          _shellrc_should_ignore "$f" && continue
+          if _matches_any "$f" "${in_pats[@]}"; then
+            printf '%s\n' "$f" >>"$list"
+          fi
+        done < <(git ls-files)
+      fi
+      [ "$debug" -eq 1 ] && { echo "collected (git):"; cat "$list" >&2; }
     else
       # Collect with find per include pattern
       _shellrc_find_prune_set
@@ -156,6 +207,7 @@ USAGE
           fi
         fi
       done | LC_ALL=C sort -u >"$list"
+      [ "$debug" -eq 1 ] && { echo "collected (find):"; cat "$list" >&2; }
     fi
 
     # Apply excludes
@@ -230,7 +282,7 @@ EOF
     cd "$target_dir" || exit 1
     _lscatclip__run
   )
-  local status=$?
+  local rc=$?
   unset -f _lscatclip__run 2>/dev/null || true
-  return $status
+  return $rc
 }
