@@ -11,4 +11,6 @@ if git diff --cached -U0 | grep -E \
  '(BEGIN (RSA|EC|OPENSSH) PRIVATE KEY|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|gh[pous]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|password\s*=|secret\s*=)' -q; then
   echo "Abort: possible secrets detected in staged changes." >&2; exit 1; fi
 
-command -v gitleaks >/dev/null 2>&1 && gitleaks protect --staged --no-banner
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --no-banner
+fi

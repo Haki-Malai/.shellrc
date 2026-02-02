@@ -12,9 +12,38 @@ _dots_now() {
   fi
 }
 
+_dots_tmpdir() {
+  local base
+  base="${TMPDIR-}"
+  if [ -n "$base" ] && [ -d "$base" ] && [ -w "$base" ]; then
+    printf '%s' "$base"
+    return
+  fi
+  if [ -d /tmp ] && [ -w /tmp ]; then
+    printf '%s' "/tmp"
+    return
+  fi
+  if [ -n "${HOME-}" ]; then
+    base="$HOME/.cache/.shellrc"
+    if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
+      printf '%s' "$base"
+      return
+    fi
+    if [ -w "$HOME" ]; then
+      printf '%s' "$HOME"
+      return
+    fi
+  fi
+  printf '%s' "."
+}
+
 _dots_autoupdate_run() (
   local repo="$DOTS_ROOT"
-  local lock="/tmp/.shellrc-autoupdate.lock"
+  local tmp uid lock
+
+  tmp="$(_dots_tmpdir)"
+  uid="${UID:-${EUID:-${USER:-user}}}"
+  lock="$tmp/.shellrc-autoupdate.${uid}.lock"
 
   mkdir "$lock" 2>/dev/null || exit 0
   trap 'rmdir "$lock" 2>/dev/null' EXIT
@@ -32,16 +61,23 @@ _dots_autoupdate_run() (
   counts="$(git rev-list --left-right --count HEAD...@{u} 2>/dev/null)" || exit 0
   ahead="${counts%% *}"
   behind="${counts##* }"
-  [ "${behind:-0}" -gt 0 ] 2>/dev/null && git merge --ff-only --quiet
+  if [ "${behind:-0}" -gt 0 ] 2>/dev/null; then
+    git merge --ff-only --quiet || exit 0
+    if [ -x "$repo/shell/shared-sync.sh" ]; then
+      "$repo/shell/shared-sync.sh" --quiet
+    fi
+  fi
 )
 
 _dots_autoupdate_start() {
-  local interval ts now last pid
+  local interval ts now last pid tmp uid
 
   interval="${DOTS_AUTOUPDATE_INTERVAL:-600}"
   [ "$interval" -gt 0 ] 2>/dev/null || return 0
 
-  ts="/tmp/.shellrc-autoupdate.ts"
+  tmp="$(_dots_tmpdir)"
+  uid="${UID:-${EUID:-${USER:-user}}}"
+  ts="$tmp/.shellrc-autoupdate.${uid}.ts"
   now="$(_dots_now)"
   last=0
   [ -f "$ts" ] && read -r last < "$ts" 2>/dev/null

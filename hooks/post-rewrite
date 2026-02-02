@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1-}" in
+  rebase) ;;
+  *) exit 0 ;;
+esac
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+sync_script="$repo_root/shell/shared-sync.sh"
+
+if [ -x "$sync_script" ]; then
+  "$sync_script" --quiet
+fi
