@@ -44,6 +44,33 @@ EOF
     for g in "$@"; do _match_glob "$p" "$g" && return 0; done
     return 1
   }
+  _match_out() {
+    # path, pattern (with directory-prefix support)
+    local p="$1" g="$2" g_norm prefix
+    g_norm="$g"
+    case "$g_norm" in ./*) g_norm="${g_norm#./}" ;; esac
+    case "$g_norm" in */) g_norm="${g_norm%/}" ;; esac
+    _match_glob "$p" "$g_norm" && return 0
+    prefix=""
+    case "$g" in
+      */\*\*) prefix="${g%/**}" ;;
+      */\*)  prefix="${g%/*}" ;;
+      */)    prefix="${g%/}" ;;
+    esac
+    if [ -n "$prefix" ]; then
+      case "$prefix" in ./*) prefix="${prefix#./}" ;; esac
+      case "$p" in
+        $prefix|$prefix/*) return 0 ;;
+      esac
+    fi
+    return 1
+  }
+  _matches_any_out() {
+    # path, patterns...
+    local p="$1"; shift; local g
+    for g in "$@"; do _match_out "$p" "$g" && return 0; done
+    return 1
+  }
   _file_contains_any() {
     # file, needles...
     local f="$1"; shift; local needle
@@ -81,6 +108,7 @@ Defaults:
 Notes:
   - Globs are shell-style, comma-separated. Quote them to avoid expansion.
   - Excludes are applied after collection. Git mode ignores depth.
+  - --out supports directory globs; trailing "/" or "/*" excludes the whole subtree (e.g., --out "tests/*").
   - --diff copies files changed in `git diff main` (errors on main branch).
   - --includes filters to files whose contents contain any literal string in the CSV (binary files are skipped).
 USAGE
@@ -215,7 +243,7 @@ USAGE
       tmp="$(mktemp)" || { rm -f "$list"; return 1; }
       while IFS= read -r f; do
         rel="${f#./}"
-        if _matches_any "$rel" "${out_pats[@]}"; then
+        if _matches_any_out "$rel" "${out_pats[@]}"; then
           continue
         fi
         printf '%s\n' "$f"

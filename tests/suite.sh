@@ -42,6 +42,7 @@ tests_suite_main() {
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip dir arg" test_lscatclip_dir_arg
   run_test "lscatclip --out excludes" test_lscatclip_out
+  run_test "lscatclip --out dir glob excludes subtree" test_lscatclip_out_dir_glob
   run_test "lscatclip --includes content filter" test_lscatclip_includes
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "lstype ranks lines" test_lstype_lines
@@ -185,9 +186,9 @@ test_lsclip_non_git() {
     reset_clip_capture
     lsclip >/dev/null 2>&1
   )
-  local status=$?
+  local rc=$?
   rm -rf "$dir"
-  [ "$status" -ne 0 ]
+  [ "$rc" -ne 0 ]
 }
 
 test_lscatclip_git() {
@@ -260,9 +261,9 @@ test_lscatclip_diff_rejects_main() {
     reset_clip_capture
     lscatclip --diff --in '*.txt' >/dev/null 2>&1
   )
-  local status=$?
+  local rc=$?
   rm -rf "$repo"
-  [ "$status" -ne 0 ]
+  [ "$rc" -ne 0 ]
 }
 
 test_lscatclip_tree() {
@@ -345,6 +346,24 @@ test_lscatclip_out() {
   rm -rf "$dir"
 }
 
+test_lscatclip_out_dir_glob() {
+  local dir output
+  dir="$(make_tmp_dir)" || return 1
+  (
+    cd "$dir" || return 1
+    mkdir -p tests/unit
+    printf 'keep\n' >keep.js
+    printf 'skip\n' >tests/unit/skip.js
+    reset_clip_capture
+    lscatclip --glob '*.js' --out 'tests/*' >/dev/null || return 1
+  ) || { rm -rf "$dir"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "keep.js" >/dev/null || { rm -rf "$dir"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "skip.js" || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
+}
+
 test_lscatclip_includes() {
   local dir output
   dir="$(make_tmp_dir)" || return 1
@@ -375,9 +394,9 @@ test_lscatclip_no_matches() {
     reset_clip_capture
     lscatclip --git --in '*.md' >/dev/null 2>&1
   )
-  local status=$?
+  local rc=$?
   rm -rf "$repo"
-  [ "$status" -ne 0 ]
+  [ "$rc" -ne 0 ]
 }
 
 test_lstype_lines() {

@@ -16,7 +16,7 @@ run_suite_for_shell() {
     return 0
   fi
 
-  local tmp_home stub_bin clip_out status cmd
+  local tmp_home stub_bin clip_out rc cmd
   tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/shellrc-test-home.XXXXXX")"
   stub_bin="$(mktemp -d "${TMPDIR:-/tmp}/shellrc-test-bin.XXXXXX")"
   clip_out="$(mktemp "${TMPDIR:-/tmp}/shellrc-clip.XXXXXX")"
@@ -96,15 +96,15 @@ EOF
   printf 'running %-5s ... ' "$shell_name"
   if "${env_prefix[@]}" "${shell_cmd[@]}"; then
     echo "ok"
-    status=0
+    rc=0
   else
-    status=$?
+    rc=$?
     echo "fail"
   fi
 
   trap - EXIT INT TERM
   cleanup
-  return "$status"
+  return "$rc"
 }
 
 overall_status=0
