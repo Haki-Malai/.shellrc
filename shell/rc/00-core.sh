@@ -15,6 +15,10 @@ if [ -n "${ZSH_VERSION-}" ]; then
   setopt SHARE_HISTORY
   setopt HIST_IGNORE_DUPS
   setopt HIST_FIND_NO_DUPS
+  setopt AUTO_CD
+  setopt CORRECT
+  setopt INTERACTIVE_COMMENTS
+  setopt RM_STAR_WAIT
 fi
 
 # Default to emacs keybindings
