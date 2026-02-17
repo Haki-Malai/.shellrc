@@ -97,6 +97,22 @@
   - `lstype -h`
   - `lstype --bytes --limit 5`
 
+### `git` (wrapper)
+- Expected behavior:
+  - Invoke `git` with `--no-pager` by default.
+  - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
+  - Delegate all other subcommands to upstream `git`.
+- Output pattern:
+  - Mirrors upstream `git` for the delegated command.
+- Exit behavior:
+  - Mirrors upstream `git` for the delegated command.
+- Side effects:
+  - Same as upstream `git` for the delegated command.
+  - `git stash` default behavior includes untracked files in created stashes.
+- Manual verification:
+  - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
+  - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
+
 ### `gdc`
 - Expected behavior:
   - Fetch `origin` quietly.

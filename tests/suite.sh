@@ -30,6 +30,8 @@ tests_suite_main() {
 
   run_test "env loads core modules" test_env_loads
   run_test "aliases register" test_aliases_exist
+  run_test "git wrapper defaults" test_git_wrapper_defaults
+  run_test "git stash includes untracked" test_git_stash_includes_untracked
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
   run_test "lsclip max depth" test_lsclip_max_depth
@@ -93,6 +95,36 @@ test_env_loads() {
 test_aliases_exist() {
   alias ls >/dev/null 2>&1 || return 1
   alias vi >/dev/null 2>&1 || return 1
+}
+
+test_git_wrapper_defaults() {
+  local def
+  def="$(typeset -f git 2>/dev/null || true)"
+  [ -n "$def" ] || return 1
+  printf '%s\n' "$def" | command grep -F -- "command git --no-pager" >/dev/null || return 1
+}
+
+test_git_stash_includes_untracked() {
+  local repo repo_path
+  repo="$(make_tmp_dir)" || return 1
+  repo_path="$repo/project"
+  mkdir -p "$repo_path"
+  (
+    cd "$repo_path" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    git commit -m "base" -q
+    printf 'change\n' >>base.txt
+    printf 'scratch\n' >untracked.txt
+    git stash -m "capture all" >/dev/null || return 1
+    [ ! -f untracked.txt ] || return 1
+    git stash show --name-only --include-untracked stash@{0} | command grep -Fx -- "untracked.txt" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
 }
 
 test_clip_backend() {
