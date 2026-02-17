@@ -52,16 +52,18 @@
 ### `lscatclip`
 - Expected behavior:
   - Collect files by git mode (`--git`/`--diff`) or glob mode (`--in`/`--glob`), apply excludes (`--out`), optional content filter (`--includes`), then copy concatenated file blocks to clipboard.
+  - In `--diff` mode, select files from `git diff --name-only main` plus untracked files, and append `git diff --no-color main` output at the end.
   - Optional tree prelude via `--tree`.
 - Stdout pattern:
   - On success: `copied <N> lines, <M> bytes to clipboard`.
   - Output payload in clipboard includes section markers:
     - `=== <cwd> ===`
     - `----- <relative-file> -----`
+    - `=== GIT DIFF: main ===` (for `--diff`)
   - On help: starts with `Usage: lscatclip`.
 - Stderr pattern:
   - Argument errors: `missing pattern for --glob`, `missing CSV for --in`, `missing CSV for --out`, `missing CSV for --includes`, `unknown arg: <arg>`.
-  - Context/filter errors: `no such directory: <path>`, `not a git repo`, `cannot use --diff on main branch`, `no main branch`, `no files matched`.
+  - Context/filter errors: `no such directory: <path>`, `not a git repo`, `no main branch`, `no files matched`.
   - Optional warning: `warning: <N> lines exceed <limit> (max <M>)`.
 - Exit behavior:
   - `0` success.
@@ -72,6 +74,7 @@
 - Manual verification:
   - `lscatclip -h`
   - `lscatclip --git --in '*.sh'`
+  - `lscatclip --diff --in '*.sh'`
   - `lscatclip --tree --glob '*.md'`
 
 ### `lstype`

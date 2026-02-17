@@ -39,7 +39,7 @@ tests_suite_main() {
   run_test "lsclip rejects non-git" test_lsclip_non_git
   run_test "lscatclip git mode" test_lscatclip_git
   run_test "lscatclip diff mode" test_lscatclip_diff
-  run_test "lscatclip diff rejects main" test_lscatclip_diff_rejects_main
+  run_test "lscatclip diff on main branch" test_lscatclip_diff_main_branch
   run_test "lscatclip tree output" test_lscatclip_tree
   run_test "lscatclip max depth" test_lscatclip_max_depth
   run_test "lscatclip dir arg" test_lscatclip_dir_arg
@@ -273,11 +273,14 @@ test_lscatclip_diff() {
   printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- base.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- new.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "=== GIT DIFF: main ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "diff --git a/base.txt b/base.txt" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "diff --git a/new.txt b/new.txt" >/dev/null || { rm -rf "$repo"; return 1; }
   rm -rf "$repo"
 }
 
-test_lscatclip_diff_rejects_main() {
-  local repo path
+test_lscatclip_diff_main_branch() {
+  local repo path output
   repo="$(make_tmp_dir)" || return 1
   path="$repo/project"
   mkdir -p "$path"
@@ -290,12 +293,19 @@ test_lscatclip_diff_rejects_main() {
     git add base.txt
     git commit -m "base" -q
     git branch -M main
+    printf 'worktree\n' >>"$path/base.txt"
+    printf 'scratch\n' >"$path/untracked.txt"
     reset_clip_capture
-    lscatclip --diff --in '*.txt' >/dev/null 2>&1
-  )
-  local rc=$?
+    lscatclip --diff --in '*.txt' >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "----- base.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "----- untracked.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "=== GIT DIFF: main ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "diff --git a/base.txt b/base.txt" >/dev/null || { rm -rf "$repo"; return 1; }
   rm -rf "$repo"
-  [ "$rc" -ne 0 ]
 }
 
 test_lscatclip_tree() {

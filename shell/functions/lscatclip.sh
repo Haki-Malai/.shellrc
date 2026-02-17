@@ -109,7 +109,7 @@ Notes:
   - Globs are shell-style, comma-separated. Quote them to avoid expansion.
   - Excludes are applied after collection. Git mode ignores depth.
   - --out supports directory globs; trailing "/" or "/*" excludes the whole subtree (e.g., --out "tests/*").
-  - --diff copies files changed in `git diff main` (errors on main branch).
+  - --diff copies files changed in `git diff main`, includes untracked files, and appends `git diff main` output at the end.
   - --includes filters to files whose contents contain any literal string in the CSV (binary files are skipped).
 USAGE
         return 0 ;;
@@ -163,17 +163,10 @@ USAGE
         cwd_rel="${cwd_abs#"$repo_root"/}"
       fi
       if [ "$use_diff" -eq 1 ]; then
-        local branch
-        branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-        if [ "$branch" = "main" ]; then
-          echo "cannot use --diff on main branch" >&2
-          rm -f "$list"
-          return 1
-        fi
         git rev-parse --verify main >/dev/null 2>&1 || { echo "no main branch" >&2; rm -f "$list"; return 1; }
         # newline-separated to avoid subshell issues
         while IFS= read -r f; do
-          [ "$debug" -eq 1 ] && echo "diff path: [$f]" >&2
+          [ "$debug" -eq 1 ] && echo "diff/untracked path: [$f]" >&2
           [ -n "$f" ] || continue
           case "$f" in ./*) f="${f#./}";; esac
           if [ -n "$cwd_rel" ] && [[ "$f" == "$cwd_rel/"* ]]; then
@@ -184,7 +177,11 @@ USAGE
           if _matches_any "$f" "${in_pats[@]}"; then
             printf '%s\n' "$f" >>"$list"
           fi
-        done < <(git diff --name-only --relative main -- .)
+        done < <(
+          git diff --name-only --relative main -- .
+          git ls-files --others --exclude-standard -- .
+        )
+        LC_ALL=C sort -u "$list" -o "$list"
       else
         # newline-separated to avoid subshell issues
         while IFS= read -r f; do
@@ -295,6 +292,14 @@ USAGE
         fi
       done <"$selected"
     } >>"$out"
+
+    if [ "$use_diff" -eq 1 ]; then
+      {
+        printf '\n%s\n' "=== GIT DIFF: main ==="
+        git diff --no-color main -- .
+        printf '\n'
+      } >>"$out"
+    fi
 
     # stats and copy
     read -r over_count max_len <<EOF
