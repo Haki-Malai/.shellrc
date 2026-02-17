@@ -14,7 +14,7 @@ If instructions conflict, stop and ask for direction, citing the conflict.
 
 ## 2) Non-negotiables (MUST)
 - Do not fabricate: if you did not verify via commands/files, say “unknown” and propose how to verify.
-- Do not stage, commit, push, merge, or modify remote resources unless the user explicitly instructs you to do so.
+- Do not stage, commit, push, merge, or modify remote resources unless the user explicitly instructs you to do so (NEVER use `git add`, `git commit` or `git push`).
 - FINAL REVIEW REQUIREMENT (cannot be bypassed): For any **non-read-only** action that targets remote systems (e.g., `gh`, `aws`, `az`, `kubectl`, `gcloud`, `terraform`, or any similar tool), you MUST:
   1) present the exact command(s) you intend to run + scope/risk/rollback, and
   2) ask for explicit verification, and
