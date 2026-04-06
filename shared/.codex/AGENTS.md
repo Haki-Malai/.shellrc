@@ -7,8 +7,7 @@ Default behavior: investigate first, then propose, then act. Do not guess.
 ## 1) Precedence (highest → lowest)
 1. Explicit user instructions in the current conversation (as long as they do not conflict with the Non-negotiables below)
 2. This AGENTS.md
-3. Repository-specific agent instructions (CLAUDE.md extends AGENTS.md)
-4. Tool defaults / personal preferences
+3. Tool defaults / personal preferences
 
 If instructions conflict, stop and ask for direction, citing the conflict.
 
@@ -101,7 +100,6 @@ Hard rule: execution must occur ONLY after the user verifies in a subsequent mes
 
 ## 7) Hooks and repo guidance (MUST)
 - If pre-commit/pre-push hooks exist: read them and follow instructions.
-- If `CLAUDE.md` exists: treat it as the authoritative replacement for this file.
 
 ## 8) Reporting requirements (MUST)
 - When you claim something, cite where it came from:
