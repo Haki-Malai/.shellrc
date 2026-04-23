@@ -188,7 +188,7 @@
 | `bbr` | Restart shortcut (`sudo shutdown -r now` on macOS, `shutdown -r 0` otherwise). | No stable output guaranteed. | Mirrors underlying shutdown command. | Host restart. | `alias bbr` (do not execute casually) |
 | `python` | Maps to `python3`. | Mirrors `python3`. | Mirrors `python3`. | None. | `alias python`; `python --version` |
 | `pip` | Maps to `pip3`. | Mirrors `pip3`. | Mirrors `pip3`. | Package management side effects depend on command. | `alias pip`; `pip --version` |
-| `nmr` (Linux) | Restart NetworkManager service. | No stable output guaranteed. | Mirrors `systemctl`. | Network interruption/restart. | `alias nmr` |
+| `nmr` | On Linux, restart NetworkManager. On macOS, flush DNS caches, restart `mDNSResponder`, and set `Wi-Fi` DNS servers to `1.1.1.1` and `8.8.8.8`. | No stable output guaranteed. | Mirrors underlying commands. | Network interruption/restart; on macOS also updates Wi-Fi DNS servers. | `alias nmr` |
 | `webunblocker` (Linux) | Remove `/etc/hosts`, then run `nmr`. | No stable output guaranteed. | Mirrors underlying commands. | Deletes `/etc/hosts`, restarts network. | `alias webunblocker` |
 
 ## 5) Repo Script Contracts

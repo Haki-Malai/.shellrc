@@ -95,6 +95,15 @@ test_env_loads() {
 test_aliases_exist() {
   alias ls >/dev/null 2>&1 || return 1
   alias vi >/dev/null 2>&1 || return 1
+  if [ "${DOTS_OS-}" = "mac" ]; then
+    alias nmr >/dev/null 2>&1 || return 1
+    alias nmr | command grep -F -- "dscacheutil -flushcache" >/dev/null || return 1
+    alias nmr | command grep -F -- "networksetup -setdnsservers Wi-Fi 1.1.1.1 8.8.8.8" >/dev/null || return 1
+  fi
+  if [ "${DOTS_OS-}" = "linux" ]; then
+    alias nmr >/dev/null 2>&1 || return 1
+    alias nmr | command grep -F -- "sudo systemctl restart NetworkManager" >/dev/null || return 1
+  fi
 }
 
 test_git_wrapper_defaults() {
