@@ -30,6 +30,7 @@ tests_suite_main() {
 
   run_test "env loads core modules" test_env_loads
   run_test "aliases register" test_aliases_exist
+  run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git yolo amends and force pushes" test_git_yolo
@@ -106,6 +107,66 @@ test_aliases_exist() {
     alias nmr >/dev/null 2>&1 || return 1
     alias nmr | command grep -F -- "sudo systemctl restart NetworkManager" >/dev/null || return 1
   fi
+}
+
+test_autoupdate_runs_per_init() {
+  local tmp marker stamp_count fakebin
+  tmp="$(make_tmp_dir)" || return 1
+  marker="$tmp/fetch.count"
+  fakebin="$tmp/bin"
+  mkdir -p "$fakebin" "$tmp/repo"
+  cat >"$fakebin/git" <<'EOF'
+#!/bin/sh
+[ "$1" = "--no-pager" ] && shift
+case "$1" in
+  rev-parse)
+    exit 0
+    ;;
+  status)
+    exit 0
+    ;;
+  fetch)
+    count=0
+    [ -f "$SHELLRC_TEST_FETCH_COUNT" ] && read -r count < "$SHELLRC_TEST_FETCH_COUNT"
+    count=$(( count + 1 ))
+    printf '%s\n' "$count" > "$SHELLRC_TEST_FETCH_COUNT"
+    exit 0
+    ;;
+  rev-list)
+    printf '0 0\n'
+    exit 0
+    ;;
+esac
+exit 1
+EOF
+  chmod +x "$fakebin/git"
+  (
+    i=0
+    export TMPDIR="$tmp"
+    export DOTS_AUTOUPDATE=1
+    export DOTS_ROOT="$tmp/repo"
+    export PATH="$fakebin:$PATH"
+    export SHELLRC_TEST_FETCH_COUNT="$marker"
+    . "$DOTS_REPO_ROOT/shell/rc/20-autoupdate.sh"
+    while [ "$i" -lt 50 ]; do
+      [ "$(cat "$marker" 2>/dev/null || true)" = "1" ] && break
+      i=$(( i + 1 ))
+      sleep 0.05
+    done
+    [ "$(cat "$marker" 2>/dev/null || true)" = "1" ] || return 1
+    i=0
+    . "$DOTS_REPO_ROOT/shell/rc/20-autoupdate.sh"
+    while [ "$i" -lt 50 ]; do
+      [ "$(cat "$marker" 2>/dev/null || true)" = "2" ] && break
+      i=$(( i + 1 ))
+      sleep 0.05
+    done
+  ) || { rm -rf "$tmp"; return 1; }
+
+  [ "$(cat "$marker")" = "2" ] || { rm -rf "$tmp"; return 1; }
+  stamp_count="$(find "$tmp" -maxdepth 1 -name '.shellrc-autoupdate.*.ts' -print | wc -l | tr -d ' ')"
+  [ "$stamp_count" = "0" ] || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
 }
 
 test_nvm_lazy_load_no_use() {

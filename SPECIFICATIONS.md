@@ -251,7 +251,7 @@
 ## 6) Internal Loaded Helpers (No Stable User Output Contract)
 The following are implementation helpers, not direct user contracts:
 - `_shellrc_should_ignore`, `_shellrc_find_prune_set`, `_shellrc_render_tree`, `_clip_cmd`
-- `_dots_now`, `_dots_tmpdir`, `_dots_autoupdate_run`, `_dots_autoupdate_start`
+- `_dots_tmpdir`, `_dots_autoupdate_run`, `_dots_autoupdate_start`
 - `_shellrc_source_env_file`, `_shellrc_auto_env`
 - `_shellrc_lan_ip`, `_ip_mask`, `_git_branch`, `_venv_seg`, `_git_seg`, `_py_seg`, `_node_seg`, `_npm_seg`, `_ip_seg`, `__visible_len`, `_build_prompt`, `precmd`
 - `_shellrc_restore_keys`, `_load_glob`, `_load_funcs`
@@ -262,9 +262,6 @@ Agents should not assert stable output contracts for these helpers unless they a
 - Observation date: February 17, 2026.
 - `./tests/run.sh` has a confirmed `zsh` failure with:
   - parse error near `(` from `shell/rc/12-safety-keys.sh:6`.
-- In some environments, `bash` may also fail early before test execution because:
-  - `shell/rc/20-autoupdate.sh` reads a timestamp file via `read -r last < "$ts"` under `set -e`.
-  - If the timestamp file has no trailing newline, `read` can return non-zero and abort shell init.
 - This is an observed implementation gap relative to intended cross-shell compatibility; this document remains normative for expected user behavior.
 
 ## 8) Source Traceability

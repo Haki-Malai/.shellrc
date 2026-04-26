@@ -1,16 +1,7 @@
 # auto-update dotfiles repo in the background (fast-forward only)
 # set DOTS_AUTOUPDATE=0 to disable
-# set DOTS_AUTOUPDATE_INTERVAL (seconds) to control frequency
 
 [ "${DOTS_AUTOUPDATE:-1}" -eq 0 ] 2>/dev/null && return 0
-
-_dots_now() {
-  if [ -n "${EPOCHSECONDS-}" ]; then
-    printf '%s' "$EPOCHSECONDS"
-  else
-    date +%s
-  fi
-}
 
 _dots_tmpdir() {
   local base
@@ -70,21 +61,6 @@ _dots_autoupdate_run() (
 )
 
 _dots_autoupdate_start() {
-  local interval ts now last pid tmp uid
-
-  interval="${DOTS_AUTOUPDATE_INTERVAL:-600}"
-  [ "$interval" -gt 0 ] 2>/dev/null || return 0
-
-  tmp="$(_dots_tmpdir)"
-  uid="${UID:-${EUID:-${USER:-user}}}"
-  ts="$tmp/.shellrc-autoupdate.${uid}.ts"
-  now="$(_dots_now)"
-  last=0
-  [ -f "$ts" ] && read -r last < "$ts" 2>/dev/null
-  [ $((now - last)) -lt "$interval" ] 2>/dev/null && return 0
-
-  printf '%s' "$now" >| "$ts" 2>/dev/null || return 0
-
   # run in a subshell so the parent shell doesn't print job notifications
   ( _dots_autoupdate_run >/dev/null 2>&1 & )
 }
