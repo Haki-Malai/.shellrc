@@ -158,15 +158,17 @@
 ### `nvm` (conditional)
 - Expected behavior:
   - Available only if `$NVM_DIR/nvm.sh` exists.
-  - First call lazy-loads NVM and delegates arguments to real `nvm`.
+  - First call lazy-loads NVM without auto-selecting a Node version, then delegates arguments to real `nvm`.
 - Output pattern:
   - No project-specific stable output; delegated to upstream `nvm`.
 - Exit behavior:
   - Mirrors upstream `nvm` behavior after load.
 - Side effects:
   - Loads NVM functions into current shell session.
+  - Does not run NVM's default `use` behavior during lazy-load.
 - Manual verification:
   - `type nvm` and `nvm --version` (when installed).
+  - In a clean shell without Node already on `PATH`, source `shell/rc/init.sh`, run `nvm current`, and confirm the loader does not switch to the NVM default alias before the explicit command.
 
 ### `sdk` (conditional)
 - Expected behavior:

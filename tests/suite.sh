@@ -30,6 +30,7 @@ tests_suite_main() {
 
   run_test "env loads core modules" test_env_loads
   run_test "aliases register" test_aliases_exist
+  run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git yolo amends and force pushes" test_git_yolo
   run_test "git stash includes untracked" test_git_stash_includes_untracked
@@ -105,6 +106,31 @@ test_aliases_exist() {
     alias nmr >/dev/null 2>&1 || return 1
     alias nmr | command grep -F -- "sudo systemctl restart NetworkManager" >/dev/null || return 1
   fi
+}
+
+test_nvm_lazy_load_no_use() {
+  local tmp log
+  tmp="$(make_tmp_dir)" || return 1
+  log="$tmp/nvm.log"
+  mkdir -p "$tmp/nvm"
+  cat >"$tmp/nvm/nvm.sh" <<'EOF'
+printf 'source:%s\n' "$*" >> "${SHELLRC_TEST_NVM_LOG:?}"
+nvm() {
+  printf 'call:%s\n' "$*" >> "${SHELLRC_TEST_NVM_LOG:?}"
+}
+EOF
+
+  (
+    export NVM_DIR="$tmp/nvm"
+    export SHELLRC_TEST_NVM_LOG="$log"
+    unset -f nvm 2>/dev/null || true
+    . "$DOTS_REPO_ROOT/shell/rc/60-devtools.sh"
+    nvm current
+  ) || { rm -rf "$tmp"; return 1; }
+
+  command grep -Fx -- "source:--no-use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
+  command grep -Fx -- "call:current" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
 }
 
 test_git_wrapper_defaults() {
