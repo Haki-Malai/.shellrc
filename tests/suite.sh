@@ -31,6 +31,7 @@ tests_suite_main() {
   run_test "env loads core modules" test_env_loads
   run_test "aliases register" test_aliases_exist
   run_test "git wrapper defaults" test_git_wrapper_defaults
+  run_test "git yolo amends and force pushes" test_git_yolo
   run_test "git stash includes untracked" test_git_stash_includes_untracked
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
@@ -111,6 +112,40 @@ test_git_wrapper_defaults() {
   def="$(typeset -f git 2>/dev/null || true)"
   [ -n "$def" ] || return 1
   printf '%s\n' "$def" | command grep -F -- "command git --no-pager" >/dev/null || return 1
+}
+
+test_git_yolo() {
+  local repo remote path local_head remote_head subject content status
+  repo="$(make_tmp_dir)" || return 1
+  remote="$repo/origin.git"
+  path="$repo/project"
+  git init --bare -q "$remote"
+  mkdir -p "$path"
+  (
+    cd "$path" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    git remote add origin "$remote"
+    git push -u origin main -q
+    printf 'changed\n' >base.txt
+    git yolo >/dev/null 2>&1 || return 1
+    status="$(git status --short)"
+    [ -z "$status" ] || return 1
+    local_head="$(git rev-parse HEAD)"
+    remote_head="$(git --git-dir="$remote" rev-parse main)"
+    [ "$local_head" = "$remote_head" ] || return 1
+    subject="$(git show --format=%s --no-patch HEAD)"
+    [ "$subject" = "base" ] || return 1
+    content="$(git show HEAD:base.txt)"
+    [ "$content" = "changed" ] || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
 }
 
 test_git_stash_includes_untracked() {

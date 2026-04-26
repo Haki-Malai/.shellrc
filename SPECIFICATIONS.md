@@ -104,17 +104,22 @@
 - Expected behavior:
   - Invoke `git` with `--no-pager` by default.
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
+  - `git yolo` runs `git add .`, then `git commit --no-edit --amend`, then `git push -f`.
   - Delegate all other subcommands to upstream `git`.
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
+  - `git yolo` mirrors upstream output for the add, amend commit, and force push commands.
 - Exit behavior:
   - Mirrors upstream `git` for the delegated command.
+  - `git yolo` stops at the first failing command and returns that non-zero exit status.
 - Side effects:
   - Same as upstream `git` for the delegated command.
   - `git stash` default behavior includes untracked files in created stashes.
+  - `git yolo` stages all working tree changes under the current directory, amends the current commit without editing the message, and force-pushes to the configured upstream.
 - Manual verification:
   - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
+  - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm the local and remote branch point to the amended commit.
 
 ### `gdc`
 - Expected behavior:

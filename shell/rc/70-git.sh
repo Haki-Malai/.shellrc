@@ -7,6 +7,13 @@ git() {
     return $?
   fi
 
+  if [ "$1" = "yolo" ]; then
+    command git add . &&
+      command git commit --no-edit --amend &&
+      command git push -f
+    return $?
+  fi
+
   if [ "$1" = "stash" ]; then
     shift
     case "${1-}" in
