@@ -253,7 +253,7 @@ The following are implementation helpers, not direct user contracts:
 - `_shellrc_should_ignore`, `_shellrc_find_prune_set`, `_shellrc_render_tree`, `_clip_cmd`
 - `_dots_tmpdir`, `_dots_autoupdate_run`, `_dots_autoupdate_start`
 - `_shellrc_source_env_file`, `_shellrc_auto_env`
-- `_shellrc_lan_ip`, `_ip_mask`, `_git_branch`, `_venv_seg`, `_git_seg`, `_py_seg`, `_node_seg`, `_npm_seg`, `_ip_seg`, `__visible_len`, `_build_prompt`, `precmd`
+- `_shellrc_lan_ip`, `_shellrc_prompt_username`, `_shellrc_prompt_user_hex`, `_shellrc_prompt_color_codes`, `_ip_mask`, `_git_branch`, `_venv_seg`, `_git_seg`, `_py_seg`, `_node_seg`, `_npm_seg`, `_ip_seg`, `__visible_len`, `_build_prompt`, `precmd`
 - `_shellrc_restore_keys`, `_load_glob`, `_load_funcs`
 
 Agents should not assert stable output contracts for these helpers unless they are intentionally promoted to user-facing commands.

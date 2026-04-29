@@ -29,6 +29,52 @@ _shellrc_lan_ip() {
   printf '%s\n' "$_SHELLRC_LAN_IP_CACHE"
 }
 
+_shellrc_prompt_username() {
+  if [ -n "${USER-}" ]; then
+    printf '%s\n' "$USER"
+  elif [ -n "${LOGNAME-}" ]; then
+    printf '%s\n' "$LOGNAME"
+  else
+    id -un 2>/dev/null || printf '%s\n' "user"
+  fi
+}
+
+_shellrc_prompt_user_hex() {
+  local username hash
+  username="${1:-$(_shellrc_prompt_username)}"
+  hash=""
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash="$(printf '%s' "$username" | sha256sum 2>/dev/null | awk '{print $1; exit}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    hash="$(printf '%s' "$username" | shasum -a 256 2>/dev/null | awk '{print $1; exit}')"
+  elif command -v cksum >/dev/null 2>&1; then
+    hash="$(printf '%s' "$username" | cksum 2>/dev/null | awk '{printf "%08x%08x%08x\n", $1, ($1 * 1103515245 + 12345) % 4294967296, ($1 * 1664525 + 1013904223) % 4294967296; exit}')"
+  fi
+
+  [ -n "$hash" ] || hash="75736572"
+  printf '%s\n' "$hash"
+}
+
+_shellrc_prompt_color_codes() {
+  local username hash codes
+
+  if [ "$#" -eq 0 ] && [ -n "${_SHELLRC_PROMPT_COLOR_CODES-}" ]; then
+    printf '%s\n' "$_SHELLRC_PROMPT_COLOR_CODES"
+    return 0
+  fi
+
+  username="${1:-$(_shellrc_prompt_username)}"
+  hash="$(_shellrc_prompt_user_hex "$username")"
+  hash="${hash}${hash}000000"
+  codes="$((16 + (16#${hash:0:2} % 216))) $((16 + (16#${hash:2:2} % 216))) $((16 + (16#${hash:4:2} % 216)))"
+
+  if [ "$#" -eq 0 ]; then
+    _SHELLRC_PROMPT_COLOR_CODES="$codes"
+  fi
+  printf '%s\n' "$codes"
+}
+
 # ---------------------------
 # zsh prompt (native, pretty)
 # ---------------------------
@@ -72,7 +118,7 @@ _npm_seg() {
   fi
   [[ -n $_NPM_VERSION_CACHE ]] && print -rn -- "[%F{167}${_NPM_VERSION_CACHE}%f]-"
 }
-_ip_seg()     { print -rn -- "[%F{196}$(_ip_mask)%f]-"; }
+_ip_seg()     { local color="${1:-196}"; print -rn -- "[%F{${color}}$(_ip_mask)%f]-"; }
 
 __visible_len() {
   local expanded clean
@@ -86,15 +132,22 @@ __visible_len() {
 
 _build_prompt() {
   local show_ip=1 show_npm=1 show_node=1 show_py=1 first len
+  local -a prompt_colors
+  local prompt_color_text
+  prompt_color_text="$(_shellrc_prompt_color_codes)"
+  prompt_colors=(${=prompt_color_text})
+  local user_color="${prompt_colors[1]:-178}"
+  local time_color="${prompt_colors[2]:-33}"
+  local ip_color="${prompt_colors[3]:-196}"
 
-  local prefix="%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{178}%n%f]-[%F{33}%*%f]-"
+  local prefix="%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{${user_color}}%n%f]-[%F{${time_color}}%*%f]-"
   local suffix="[%F{70}%~%f]"
   local middle all
 
   local _assemble
   _assemble() {
     middle=""
-    (( show_ip   )) && middle+="$(_ip_seg)"
+    (( show_ip   )) && middle+="$(_ip_seg "$ip_color")"
     middle+="$(_git_seg)"
     (( show_py   )) && middle+="$(_py_seg)"
     (( show_node )) && middle+="$(_node_seg)"
@@ -137,17 +190,26 @@ fi
 # bash prompt (original)
 # ---------------------------
 if [ -n "${BASH_VERSION-}" ]; then
+  prompt_colors="$(_shellrc_prompt_color_codes)"
+  prompt_user_color="${prompt_colors%% *}"
+  prompt_colors_rest="${prompt_colors#* }"
+  prompt_time_color="${prompt_colors_rest%% *}"
+  prompt_ip_color="${prompt_colors_rest##* }"
+
   white="\[\e[0;37m\]"; color_red="\[\e[0;1;38;5;196m\]"
-  lightGreen="\[\e[0;32m\]"; orange="\[\e[0;33m\]"; lightBlue="\[\e[0;94m\]"
+  lightGreen="\[\e[0;32m\]"
+  usernameColor="\[\e[0;1;38;5;${prompt_user_color:-178}m\]"
+  timeColor="\[\e[0;1;38;5;${prompt_time_color:-33}m\]"
+  ipColor="\[\e[0;1;38;5;${prompt_ip_color:-196}m\]"
   npmRed="\[\e[0;1;38;5;167m\]"; nodeGreen="\[\e[0;1;32m\]"
   pythonYellow="\[\e[0;1;38;5;226m\]"; gitColor="\[\e[0;1;94m\]"
   firstLineChar=$white"\342\224\214"; secondLineChar="\342\224\224"; new_line="\n"; Xmark="\342\234\227"
 
   xMark='$([[ $? != 0 ]] && echo "['$color_red$Xmark$white']-")'
   usrPrompt="[\[\e[0;5;38;5;197m\]\$"$white"]-"
-  [ ${EUID} != 0 ] && username="["$orange"\u"$white"]-"
-  time="["$lightBlue"\A"$white"]-"
-  ip="[$color_red$(_shellrc_lan_ip)$white]-"
+  [ ${EUID} != 0 ] && username="["$usernameColor"\u"$white"]-"
+  time="["$timeColor"\A"$white"]-"
+  ip="[$ipColor$(_shellrc_lan_ip)$white]-"
   node='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && node -v | awk '"'"'{print"\033[0m['$nodeGreen'"$1"\033[0m]-"}'"'"')'$white
   npm='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && npm --loglevel=silent -v | awk '"'"'{print"\033[0m['$npmRed'"$1"\033[0m]-"}'"'"')'$white
   python='$(find -maxdepth 1 -type f -name "*.py" 2>/dev/null | grep -q . && python3 -V | awk '"'"'{print"\033[0m['$pythonYellow'"$2"\033[0m]-"}'"'"')'$white
