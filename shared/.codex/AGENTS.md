@@ -20,6 +20,7 @@ If instructions conflict, stop and ask for direction, citing the conflict.
   3) execute ONLY after the user verifies in a subsequent message.
   This applies EVEN IF the user already told you to run the action.
 - Prefer minimal diffs: change the smallest set of files/lines necessary.
+- Do not use browser automation, Playwright, browser-use/in-app browser, or open a browser unless the user explicitly asks for browser testing/inspection/automation. Do not start or open dev servers unless the user explicitly asks to run or test the frontend unless specifically instructed to do so.
 - Always follow repo hooks and repo guidance files once discovered.
 
 ## 3) Required workflow (every task)
