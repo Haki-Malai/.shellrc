@@ -1,6 +1,25 @@
 # Git defaults:
 # - disable pager output by default
 # - include untracked files in stash push/save flows
+_git_yolo_malai_identity() {
+  command git log --all --format='%aN	%aE%n%cN	%cE' 2>/dev/null |
+    awk -F '\t' 'BEGIN { found = 0 }
+      tolower($1) ~ /malai/ && $1 != "" && $2 != "" {
+        print $1 "\t" $2
+        found = 1
+        exit
+      }
+      END { exit found ? 0 : 1 }'
+}
+
+_git_print_commit_account() {
+  command git show --format='Commiter identity: %an <%ae>' --no-patch HEAD
+}
+
+_git_current_head() {
+  command git rev-parse --verify HEAD 2>/dev/null
+}
+
 git() {
   if [ "$#" -eq 0 ]; then
     command git --no-pager
@@ -8,10 +27,36 @@ git() {
   fi
 
   if [ "$1" = "yolo" ]; then
-    command git add . &&
-      command git commit --no-edit --amend &&
-      command git push -f
-    return $?
+    local identity name email
+    identity="$(_git_yolo_malai_identity)" || identity=""
+    if [ -n "$identity" ]; then
+      name="${identity%%	*}"
+      email="${identity#*	}"
+      command git add . &&
+        GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend &&
+        command git push -f
+    else
+      command git add . &&
+        command git commit --no-edit --amend &&
+        command git push -f
+    fi
+    local rc=$?
+    if [ "$rc" -eq 0 ]; then
+      _git_print_commit_account
+    fi
+    return "$rc"
+  fi
+
+  if [ "$1" = "commit" ]; then
+    local before after
+    before="$(_git_current_head)" || before=""
+    command git --no-pager "$@"
+    local rc=$?
+    after="$(_git_current_head)" || after=""
+    if [ "$rc" -eq 0 ] && [ -n "$after" ] && [ "$after" != "$before" ]; then
+      _git_print_commit_account
+    fi
+    return "$rc"
   fi
 
   if [ "$1" = "stash" ]; then

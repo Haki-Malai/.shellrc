@@ -33,6 +33,7 @@ tests_suite_main() {
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
   run_test "git wrapper defaults" test_git_wrapper_defaults
+  run_test "git commit prints account" test_git_commit_account
   run_test "git yolo amends and force pushes" test_git_yolo
   run_test "git stash includes untracked" test_git_stash_includes_untracked
   run_test "clip writes via backend" test_clip_backend
@@ -54,6 +55,7 @@ tests_suite_main() {
   run_test "lstype ranks bytes" test_lstype_bytes
   run_test "lstype dir arg" test_lstype_dir_arg
   run_test "prompt includes cat" test_prompt_contains_cat
+  run_test "prompt colors derive from username hash" test_prompt_username_hash_colors
 
   printf '%s: %d run, %d failed\n' "${tests__shell:-unknown}" "$tests__run" "$tests__fail"
   if [ "$tests__fail" -eq 0 ]; then
@@ -201,8 +203,25 @@ test_git_wrapper_defaults() {
   printf '%s\n' "$def" | command grep -F -- "command git --no-pager" >/dev/null || return 1
 }
 
+test_git_commit_account() {
+  local repo output
+  repo="$(make_tmp_dir)" || return 1
+  (
+    cd "$repo" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    output="$(git commit -m "base" 2>&1)" || return 1
+    printf '%s\n' "$output" | command grep -F -- "Commiter identity: Test User <test@example.com>" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
+}
+
 test_git_yolo() {
-  local repo remote path local_head remote_head subject content status
+  local repo remote path local_head remote_head subject content status output author email
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   path="$repo/project"
@@ -216,20 +235,28 @@ test_git_yolo() {
     printf 'base\n' >base.txt
     git add base.txt
     git commit -m "base" -q
+    printf 'malai\n' >malai.txt
+    git add malai.txt
+    GIT_AUTHOR_NAME="Haki Malai" GIT_AUTHOR_EMAIL="haki@example.com" GIT_COMMITTER_NAME="Haki Malai" GIT_COMMITTER_EMAIL="haki@example.com" git commit -m "malai identity" -q
     git branch -M main
     git remote add origin "$remote"
     git push -u origin main -q
     printf 'changed\n' >base.txt
-    git yolo >/dev/null 2>&1 || return 1
+    output="$(git yolo 2>&1)" || return 1
     status="$(git status --short)"
     [ -z "$status" ] || return 1
     local_head="$(git rev-parse HEAD)"
     remote_head="$(git --git-dir="$remote" rev-parse main)"
     [ "$local_head" = "$remote_head" ] || return 1
     subject="$(git show --format=%s --no-patch HEAD)"
-    [ "$subject" = "base" ] || return 1
+    [ "$subject" = "malai identity" ] || return 1
     content="$(git show HEAD:base.txt)"
     [ "$content" = "changed" ] || return 1
+    author="$(git show --format=%an --no-patch HEAD)"
+    email="$(git show --format=%ae --no-patch HEAD)"
+    [ "$author" = "Haki Malai" ] || return 1
+    [ "$email" = "haki@example.com" ] || return 1
+    printf '%s\n' "$output" | command grep -F -- "Commiter identity: Haki Malai <haki@example.com>" >/dev/null || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
@@ -642,6 +669,39 @@ test_prompt_contains_cat() {
     case "$PS1" in *"🐈"*) :;; *) return 1;; esac
   elif [ -n "${ZSH_VERSION-}" ]; then
     case "$PROMPT" in *"🐈"*) :;; *) return 1;; esac
+  fi
+}
+
+test_prompt_username_hash_colors() {
+  local username hash hash_prefix expected colors user_color rest time_color ip_color prompt
+  username="$(_shellrc_prompt_username)" || return 1
+  hash="$(_shellrc_prompt_user_hex "$username")" || return 1
+  hash_prefix="${hash}${hash}000000"
+
+  expected="$((16 + (16#${hash_prefix:0:2} % 216)))"
+  expected="$expected $((16 + (16#${hash_prefix:2:2} % 216)))"
+  expected="$expected $((16 + (16#${hash_prefix:4:2} % 216)))"
+
+  colors="$(_shellrc_prompt_color_codes "$username")" || return 1
+  [ "$colors" = "$expected" ] || return 1
+
+  user_color="${colors%% *}"
+  rest="${colors#* }"
+  time_color="${rest%% *}"
+  ip_color="${rest##* }"
+
+  if [ -n "${BASH_VERSION-}" ]; then
+    prompt="$PS1"
+    printf '%s\n' "$prompt" | command grep -F -- "38;5;${user_color}m\\]\\u" >/dev/null || return 1
+    printf '%s\n' "$prompt" | command grep -F -- "38;5;${time_color}m\\]\\A" >/dev/null || return 1
+    printf '%s\n' "$prompt" | command grep -F -- "38;5;${ip_color}m\\]" >/dev/null || return 1
+  elif [ -n "${ZSH_VERSION-}" ]; then
+    PROMPT_MAX=1000
+    _build_prompt
+    prompt="$PROMPT"
+    printf '%s\n' "$prompt" | command grep -F -- "%F{${user_color}}%n%f" >/dev/null || return 1
+    printf '%s\n' "$prompt" | command grep -F -- "%F{${time_color}}%*%f" >/dev/null || return 1
+    printf '%s\n' "$prompt" | command grep -F -- "%F{${ip_color}}" >/dev/null || return 1
   fi
 }
 
