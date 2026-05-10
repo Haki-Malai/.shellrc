@@ -216,14 +216,20 @@ test_git_checkout_previous_branch() {
     git add base.txt
     git commit -m "base" -q
     git branch -M main
+    git branch short
     git branch feature
+    git branch longfeature
     unset previousBranch
+    git checkout short -q || return 1
+    [ -z "${previousBranch-}" ] || return 1
     git checkout feature -q || return 1
-    [ "${previousBranch-}" = "main" ] || return 1
+    [ "${previousBranch-}" = "short" ] || return 1
     git checkout does-not-exist >/dev/null 2>&1 && return 1
-    [ "${previousBranch-}" = "main" ] || return 1
+    [ "${previousBranch-}" = "short" ] || return 1
     git checkout main -q || return 1
-    [ "${previousBranch-}" = "feature" ] || return 1
+    [ "${previousBranch-}" = "short" ] || return 1
+    git checkout longfeature -q || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"

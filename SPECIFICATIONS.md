@@ -106,7 +106,7 @@
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .`, amends with that identity when found, then runs `git push -f`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
-  - After successful `git checkout` commands that switch away from a named branch, set `previousBranch` to the branch name from before the checkout.
+  - After successful `git checkout` commands that switch away from a named branch to another branch whose name is longer than 6 characters, set `previousBranch` to the branch name from before the checkout.
   - Delegate all other subcommands to upstream `git`.
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
