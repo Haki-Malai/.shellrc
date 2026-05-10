@@ -106,6 +106,7 @@
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .`, amends with that identity when found, then runs `git push -f`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
+  - After successful `git checkout` commands that switch away from a named branch, set `previousBranch` to the branch name from before the checkout.
   - Delegate all other subcommands to upstream `git`.
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
@@ -116,10 +117,12 @@
   - `git yolo` stops at the first failing command and returns that non-zero exit status.
 - Side effects:
   - Same as upstream `git` for the delegated command.
+  - `git checkout` may update the current shell variable `previousBranch` after a successful branch switch.
   - `git stash` default behavior includes untracked files in created stashes.
   - `git yolo` stages all working tree changes under the current directory, may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and force-pushes to the configured upstream.
 - Manual verification:
   - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
+  - In a disposable git repo with `main` and `feature` branches, run `git checkout feature` from `main` and confirm `echo "$previousBranch"` prints `main`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
   - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm the local and remote branch point to the amended commit.
 

@@ -20,6 +20,10 @@ _git_current_head() {
   command git rev-parse --verify HEAD 2>/dev/null
 }
 
+_git_current_branch() {
+  command git symbolic-ref --quiet --short HEAD 2>/dev/null
+}
+
 git() {
   if [ "$#" -eq 0 ]; then
     command git --no-pager
@@ -55,6 +59,18 @@ git() {
     after="$(_git_current_head)" || after=""
     if [ "$rc" -eq 0 ] && [ -n "$after" ] && [ "$after" != "$before" ]; then
       _git_print_commit_account
+    fi
+    return "$rc"
+  fi
+
+  if [ "$1" = "checkout" ]; then
+    local before after
+    before="$(_git_current_branch)" || before=""
+    command git --no-pager "$@"
+    local rc=$?
+    after="$(_git_current_branch)" || after=""
+    if [ "$rc" -eq 0 ] && [ -n "$before" ] && [ "$after" != "$before" ]; then
+      previousBranch="$before"
     fi
     return "$rc"
   fi

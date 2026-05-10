@@ -33,6 +33,7 @@ tests_suite_main() {
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
   run_test "git wrapper defaults" test_git_wrapper_defaults
+  run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git commit prints account" test_git_commit_account
   run_test "git yolo amends and force pushes" test_git_yolo
   run_test "git stash includes untracked" test_git_stash_includes_untracked
@@ -201,6 +202,31 @@ test_git_wrapper_defaults() {
   def="$(typeset -f git 2>/dev/null || true)"
   [ -n "$def" ] || return 1
   printf '%s\n' "$def" | command grep -F -- "command git --no-pager" >/dev/null || return 1
+}
+
+test_git_checkout_previous_branch() {
+  local repo
+  repo="$(make_tmp_dir)" || return 1
+  (
+    cd "$repo" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    git branch feature
+    unset previousBranch
+    git checkout feature -q || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
+    git checkout does-not-exist >/dev/null 2>&1 && return 1
+    [ "${previousBranch-}" = "main" ] || return 1
+    git checkout main -q || return 1
+    [ "${previousBranch-}" = "feature" ] || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
 }
 
 test_git_commit_account() {
