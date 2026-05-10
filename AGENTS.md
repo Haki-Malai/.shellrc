@@ -20,11 +20,15 @@ If instructions conflict, stop and ask for direction.
 - Keep behavior and docs aligned: if command behavior/output changes, update `SPECIFICATIONS.md` in the same change.
 
 ## Required Workflow (Every Task)
-### 1) Discovery (must run and summarize)
-- `git status --short --branch`
-- `git rev-parse --abbrev-ref HEAD`
-- `git diff`
-- If current branch is not `main`: `git diff main`
+### 1) Discovery
+- Do enough file/command discovery to understand the task before editing.
+- Do not require `git status`, `git diff`, or branch comparisons for every task.
+- Before running any git command that may mutate the working tree, index/stage, branch, or history, run and summarize:
+  - `git status --short --branch`
+  - `git diff`
+  - `git diff --cached`
+- Mutating or potentially mutating git commands include `git add`, `git restore`, `git reset`, `git checkout`, `git switch`, `git stash`, `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git clean`, and similar commands.
+- Read-only git commands such as `git status`, `git diff`, `git diff --cached`, `git log`, `git show`, `git branch --show-current`, and `git rev-parse` do not trigger this preflight.
 
 ### 2) Plan Before Editing
 - State the intended approach in 3-6 bullets.
@@ -79,4 +83,3 @@ Manual checks must match changed behavior and include:
   - file reference(s) with relevant lines.
 - Separate observed facts from assumptions.
 - If blocked, report what was tried, what was observed, and what is needed next.
-

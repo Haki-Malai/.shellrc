@@ -13,7 +13,14 @@ _git_yolo_malai_identity() {
 }
 
 _git_print_commit_account() {
-  command git show --format='Commiter identity: %an <%ae>' --no-patch HEAD
+  local name email colors color
+  name="$(command git show --format='%an' --no-patch HEAD 2>/dev/null)" || return $?
+  email="$(command git show --format='%ae' --no-patch HEAD 2>/dev/null)" || return $?
+  if type _shellrc_prompt_color_codes >/dev/null 2>&1; then
+    colors="$(_shellrc_prompt_color_codes 2>/dev/null)" || colors=""
+    color="${colors%% *}"
+  fi
+  printf 'Commiter identity: \033[0;1;38;5;%sm%s\033[0m <%s>\n' "${color:-178}" "$name" "$email"
 }
 
 _git_current_head() {

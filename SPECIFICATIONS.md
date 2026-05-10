@@ -111,7 +111,7 @@
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
   - `git yolo` mirrors upstream output for the add, amend commit, and force push commands.
-  - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author.
+  - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
   - Mirrors upstream `git` for the delegated command.
   - `git yolo` stops at the first failing command and returns that non-zero exit status.

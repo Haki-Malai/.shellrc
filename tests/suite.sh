@@ -230,7 +230,7 @@ test_git_checkout_previous_branch() {
 }
 
 test_git_commit_account() {
-  local repo output
+  local repo output color
   repo="$(make_tmp_dir)" || return 1
   (
     cd "$repo" || return 1
@@ -240,14 +240,17 @@ test_git_commit_account() {
     printf 'base\n' >base.txt
     git add base.txt
     output="$(git commit -m "base" 2>&1)" || return 1
-    printf '%s\n' "$output" | command grep -F -- "Commiter identity: Test User <test@example.com>" >/dev/null || return 1
+    color="$(_shellrc_prompt_color_codes)"
+    color="${color%% *}"
+    printf '%s\n' "$output" | command grep -F -- "Commiter identity: " >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "$(printf '\033[0;1;38;5;%smTest User\033[0m <test@example.com>' "${color:-178}")" >/dev/null || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
 }
 
 test_git_yolo() {
-  local repo remote path local_head remote_head subject content status output author email
+  local repo remote path local_head remote_head subject content status output author email color
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   path="$repo/project"
@@ -282,7 +285,10 @@ test_git_yolo() {
     email="$(git show --format=%ae --no-patch HEAD)"
     [ "$author" = "Haki Malai" ] || return 1
     [ "$email" = "haki@example.com" ] || return 1
-    printf '%s\n' "$output" | command grep -F -- "Commiter identity: Haki Malai <haki@example.com>" >/dev/null || return 1
+    color="$(_shellrc_prompt_color_codes)"
+    color="${color%% *}"
+    printf '%s\n' "$output" | command grep -F -- "Commiter identity: " >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "$(printf '\033[0;1;38;5;%smHaki Malai\033[0m <haki@example.com>' "${color:-178}")" >/dev/null || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
