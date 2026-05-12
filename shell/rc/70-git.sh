@@ -82,6 +82,22 @@ git() {
     return "$rc"
   fi
 
+  if [ "$1" = "ri" ]; then
+    local branch
+    shift
+    branch="$(_git_current_branch)" || branch=""
+    if [ -z "$branch" ]; then
+      printf 'git ri: current HEAD is not a branch\n' >&2
+      return 1
+    fi
+    command git --no-pager fetch origin main &&
+      git checkout main &&
+      command git --no-pager merge --ff-only origin/main &&
+      git checkout "$branch" &&
+      command git --no-pager rebase -i "$@" main
+    return $?
+  fi
+
   if [ "$1" = "stash" ]; then
     shift
     case "${1-}" in
