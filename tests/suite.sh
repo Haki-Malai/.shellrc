@@ -218,18 +218,21 @@ test_git_checkout_previous_branch() {
     git branch -M main
     git branch short
     git branch feature
+    git branch sixsix
     git branch longfeature
     unset previousBranch
     git checkout short -q || return 1
     [ -z "${previousBranch-}" ] || return 1
     git checkout feature -q || return 1
-    [ "${previousBranch-}" = "short" ] || return 1
-    git checkout does-not-exist >/dev/null 2>&1 && return 1
-    [ "${previousBranch-}" = "short" ] || return 1
+    [ -z "${previousBranch-}" ] || return 1
     git checkout main -q || return 1
-    [ "${previousBranch-}" = "short" ] || return 1
+    [ "${previousBranch-}" = "feature" ] || return 1
+    git checkout does-not-exist >/dev/null 2>&1 && return 1
+    [ "${previousBranch-}" = "feature" ] || return 1
+    git checkout sixsix -q || return 1
+    [ "${previousBranch-}" = "feature" ] || return 1
     git checkout longfeature -q || return 1
-    [ "${previousBranch-}" = "main" ] || return 1
+    [ "${previousBranch-}" = "sixsix" ] || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
