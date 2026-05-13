@@ -12,7 +12,36 @@
 - Dynamic values (paths, counts, bytes, branch names, versions, timestamps) are variable and not exact-match fields.
 - For commands without stable output, behavior and side effects are the contract.
 
-## 3) User-Facing Function Contracts
+## 3) Startup Behavior
+
+### User switch safety
+- Expected behavior:
+  - During interactive startup, if the current directory is inside another user's home path (`/Users/<user>/...` on macOS or `/home/<user>/...` on Linux), change directory to the current user's home directory when it can be resolved.
+  - If the current user, current directory owner segment, or current user's home cannot be resolved, leave the directory unchanged.
+- Output pattern:
+  - No stdout or stderr expected.
+- Exit behavior:
+  - Startup continues even if the directory cannot be changed.
+- Side effects:
+  - Current shell directory may change to the current user's home after a user switch.
+- Manual verification:
+  - Switch to another user from a path under the previous user's home and confirm `pwd` is the new user's home after shell startup.
+
+### `pyenv` initialization (conditional)
+- Expected behavior:
+  - Initializes `pyenv` only when `pyenv` is on `PATH` and `$PYENV_ROOT` is safe for the current user.
+  - Skips initialization when `$PYENV_ROOT` or `$PYENV_ROOT/shims` exists but is not writable, or when `$PYENV_ROOT` points into another user's `/Users/<user>` or `/home/<user>` tree.
+- Output pattern:
+  - No project-specific stable output; delegated to upstream `pyenv` when initialized.
+- Exit behavior:
+  - Startup continues when `pyenv` is missing or skipped.
+- Side effects:
+  - When initialized, `$PYENV_ROOT/bin` and `$PYENV_ROOT/shims` are prepended to `PATH`.
+  - When skipped, another user's shims are not prepended and no rehash is attempted.
+- Manual verification:
+  - Source `shell/rc/init.sh` as a different user with inherited `PYENV_ROOT` pointing at the previous user's pyenv and confirm there is no `pyenv: cannot rehash` error.
+
+## 4) User-Facing Function Contracts
 
 ### `clip`
 - Expected behavior:
@@ -192,7 +221,7 @@
 - Manual verification:
   - `type sdk` and `sdk version` (when installed).
 
-## 4) Alias Contracts
+## 5) Alias Contracts
 
 | Alias | Expected behavior | Output pattern | Exit behavior | Side effects | Manual verification |
 | --- | --- | --- | --- | --- | --- |
@@ -207,7 +236,7 @@
 | `nmr` | On Linux, restart NetworkManager. On macOS, flush DNS caches, restart `mDNSResponder`, and set `Wi-Fi` DNS servers to `1.1.1.1` and `8.8.8.8`. | No stable output guaranteed. | Mirrors underlying commands. | Network interruption/restart; on macOS also updates Wi-Fi DNS servers. | `alias nmr` |
 | `webunblocker` (Linux) | Remove `/etc/hosts`, then run `nmr`. | No stable output guaranteed. | Mirrors underlying commands. | Deletes `/etc/hosts`, restarts network. | `alias webunblocker` |
 
-## 5) Repo Script Contracts
+## 6) Repo Script Contracts
 
 ### `tests/run.sh`
 - Expected behavior:
@@ -257,37 +286,40 @@
 - Manual verification:
   - `shell/shared-sync.sh --quiet`
 
-## 6) Internal Loaded Helpers (No Stable User Output Contract)
+## 7) Internal Loaded Helpers (No Stable User Output Contract)
 The following are implementation helpers, not direct user contracts:
 - `_shellrc_should_ignore`, `_shellrc_find_prune_set`, `_shellrc_render_tree`, `_clip_cmd`
 - `_dots_tmpdir`, `_dots_autoupdate_run`, `_dots_autoupdate_start`
 - `_shellrc_source_env_file`, `_shellrc_auto_env`
+- `_shellrc_current_user`, `_shellrc_user_home`, `_shellrc_path_home_user`, `_shellrc_home_for_current_user`, `_shellrc_cd_home_if_foreign_pwd`, `_shellrc_pyenv_root_is_safe`
 - `_shellrc_lan_ip`, `_shellrc_prompt_username`, `_shellrc_prompt_user_hex`, `_shellrc_prompt_color_codes`, `_ip_mask`, `_git_branch`, `_venv_seg`, `_git_seg`, `_py_seg`, `_node_seg`, `_npm_seg`, `_ip_seg`, `__visible_len`, `_build_prompt`, `precmd`
 - `_shellrc_restore_keys`, `_load_glob`, `_load_funcs`
 
 Agents should not assert stable output contracts for these helpers unless they are intentionally promoted to user-facing commands.
 
-## 7) Current Observed Gaps (Traceability)
-- Observation date: February 17, 2026.
-- `./tests/run.sh` has a confirmed `zsh` failure with:
-  - parse error near `(` from `shell/rc/12-safety-keys.sh:6`.
-- This is an observed implementation gap relative to intended cross-shell compatibility; this document remains normative for expected user behavior.
+## 8) Current Observed Gaps (Traceability)
+- Observation date: May 13, 2026.
+- No current observed gaps after `./tests/run.sh` passes in bash and zsh.
 
-## 8) Source Traceability
+## 9) Source Traceability
 Contracts in this document are grounded in:
 - `shell/functions/clip_backend.sh`
 - `shell/functions/lsclip.sh`
 - `shell/functions/lscatclip.sh`
 - `shell/functions/lstype.sh`
 - `shell/functions/gdc.sh`
+- `shell/rc/01-user-context.sh`
+- `shell/rc/05-pyenv.sh`
+- `shell/rc/12-safety-keys.sh`
 - `shell/rc/20-aliases.sh`
+- `shell/rc/50-prompt.sh`
 - `shell/rc/90-os-linux.sh`
 - `shell/rc/init.sh`
 - `tests/run.sh`
 - `tests/suite.sh`
 - `shell/shared-sync.sh`
 
-## 9) Agent Specification Maintenance Rules
+## 10) Agent Specification Maintenance Rules
 - If an agent believes behavior may have changed from this specification (or is ambiguous), the agent must explicitly notify the user and request user verification/check before finalizing claims about expected behavior.
 - For any user-requested functionality change (adding, refactoring, or removing behavior), updating `SPECIFICATIONS.md` in the same change is mandatory.
 - "Spec updated" means the affected command/alias/script contract sections are revised to reflect the new expected user-facing behavior and output patterns.

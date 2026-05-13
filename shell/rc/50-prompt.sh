@@ -79,7 +79,8 @@ _shellrc_prompt_color_codes() {
 # zsh prompt (native, pretty)
 # ---------------------------
 if [ -n "${ZSH_VERSION-}" ]; then
-  eval "$(cat <<'ZSH'
+  emulate zsh -c "$(cat <<'ZSH'
+emulate -L zsh
 autoload -U colors && colors
 setopt PROMPT_SUBST
 setopt EXTENDED_GLOB
@@ -95,6 +96,8 @@ _git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null }
 _venv_seg()   { [[ -n ${VIRTUAL_ENV-} ]] && print -rn -- "[%F{226}${VIRTUAL_ENV:t}%f]-"; }
 _git_seg()    { local b; b="$(_git_branch)"; [[ -n $b ]] && print -rn -- "[%F{69}$b%f]-"; }
 _py_seg() {
+  emulate -L zsh
+  setopt EXTENDED_GLOB
   local -a _py=( *.py(#qN) )
   (( ${#_py} )) || return
   if [[ -z ${_PY_VERSION_CACHE-} ]]; then
@@ -103,6 +106,8 @@ _py_seg() {
   [[ -n $_PY_VERSION_CACHE ]] && print -rn -- "[%F{226}${_PY_VERSION_CACHE}%f]-"
 }
 _node_seg() {
+  emulate -L zsh
+  setopt EXTENDED_GLOB
   local -a _js=( *.js*(#qN) )
   (( ${#_js} )) || return
   if [[ -z ${_NODE_VERSION_CACHE-} ]]; then
@@ -111,6 +116,8 @@ _node_seg() {
   [[ -n $_NODE_VERSION_CACHE ]] && print -rn -- "[%F{46}${_NODE_VERSION_CACHE}%f]-"
 }
 _npm_seg() {
+  emulate -L zsh
+  setopt EXTENDED_GLOB
   local -a _js=( *.js*(#qN) )
   (( ${#_js} )) || return
   if [[ -z ${_NPM_VERSION_CACHE-} ]]; then
@@ -131,6 +138,8 @@ __visible_len() {
 : ${PROMPT_MAX:=$(( COLUMNS - 2 ))}
 
 _build_prompt() {
+  emulate -L zsh
+  setopt EXTENDED_GLOB
   local show_ip=1 show_npm=1 show_node=1 show_py=1 first len
   local -a prompt_colors
   local prompt_color_text

@@ -29,6 +29,8 @@ tests_suite_main() {
   tests__shell="${BASH_VERSION:+bash}${ZSH_VERSION:+zsh}"
 
   run_test "env loads core modules" test_env_loads
+  run_test "user switch moves out of foreign home" test_user_switch_moves_out_of_foreign_home
+  run_test "pyenv skips foreign unwritable root" test_pyenv_skips_foreign_unwritable_root
   run_test "aliases register" test_aliases_exist
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
@@ -97,6 +99,55 @@ test_env_loads() {
   type lsclip >/dev/null 2>&1 || return 1
   type lscatclip >/dev/null 2>&1 || return 1
   type clip >/dev/null 2>&1 || return 1
+}
+
+test_user_switch_moves_out_of_foreign_home() {
+  local tmp users_root current_user current_home foreign_dir result
+  tmp="$(make_tmp_dir)" || return 1
+  users_root="$tmp/users"
+  current_user="$(id -un 2>/dev/null)" || { rm -rf "$tmp"; return 1; }
+  current_home="$users_root/$current_user"
+  foreign_dir="$users_root/previous-user/project"
+
+  mkdir -p "$current_home" "$foreign_dir" || { rm -rf "$tmp"; return 1; }
+  result="$(
+    cd "$foreign_dir" || exit 1
+    SHELLRC_TEST_USERS_ROOT="$users_root"
+    HOME="$current_home"
+    export SHELLRC_TEST_USERS_ROOT HOME
+    . "$DOTS_REPO_ROOT/shell/rc/01-user-context.sh"
+    printf '%s\n' "$PWD"
+  )" || { rm -rf "$tmp"; return 1; }
+
+  [ "$result" = "$current_home" ] || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+}
+
+test_pyenv_skips_foreign_unwritable_root() {
+  local tmp users_root foreign_pyenv fakebin marker
+  tmp="$(make_tmp_dir)" || return 1
+  users_root="$tmp/users"
+  foreign_pyenv="$users_root/previous-user/.pyenv"
+  fakebin="$tmp/bin"
+  marker="$tmp/pyenv-called"
+
+  mkdir -p "$foreign_pyenv/shims" "$fakebin" || { rm -rf "$tmp"; return 1; }
+  chmod 0555 "$foreign_pyenv" "$foreign_pyenv/shims" || { rm -rf "$tmp"; return 1; }
+  printf '%s\n' '#!/bin/sh' 'printf called > "$SHELLRC_TEST_PYENV_MARKER"' 'exit 0' > "$fakebin/pyenv"
+  chmod +x "$fakebin/pyenv" || { chmod 0755 "$foreign_pyenv" "$foreign_pyenv/shims"; rm -rf "$tmp"; return 1; }
+
+  (
+    export SHELLRC_TEST_USERS_ROOT="$users_root"
+    export SHELLRC_TEST_PYENV_MARKER="$marker"
+    export PYENV_ROOT="$foreign_pyenv"
+    export PATH="$fakebin:$PATH"
+    . "$DOTS_REPO_ROOT/shell/rc/01-user-context.sh"
+    . "$DOTS_REPO_ROOT/shell/rc/05-pyenv.sh"
+  ) || { chmod 0755 "$foreign_pyenv" "$foreign_pyenv/shims"; rm -rf "$tmp"; return 1; }
+
+  chmod 0755 "$foreign_pyenv" "$foreign_pyenv/shims"
+  [ ! -f "$marker" ] || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
 }
 
 test_aliases_exist() {
@@ -304,14 +355,14 @@ test_git_commit_account() {
 }
 
 test_git_yolo() {
-  local repo remote path local_head remote_head subject content status output author email color
+  local repo remote project_dir local_head remote_head subject content worktree_status output author email color
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
-  path="$repo/project"
+  project_dir="$repo/project"
   git init --bare -q "$remote"
-  mkdir -p "$path"
+  mkdir -p "$project_dir"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git config user.email "test@example.com"
     git config user.name "Test User"
@@ -326,8 +377,8 @@ test_git_yolo() {
     git push -u origin main -q
     printf 'changed\n' >base.txt
     output="$(git yolo 2>&1)" || return 1
-    status="$(git status --short)"
-    [ -z "$status" ] || return 1
+    worktree_status="$(git status --short)"
+    [ -z "$worktree_status" ] || return 1
     local_head="$(git rev-parse HEAD)"
     remote_head="$(git --git-dir="$remote" rev-parse main)"
     [ "$local_head" = "$remote_head" ] || return 1
@@ -380,15 +431,15 @@ test_clip_backend() {
 }
 
 test_lsclip_tree() {
-  local repo path
+  local repo project_dir
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path/dir/sub" "$path/node_modules"
-  printf 'file a\n' >"$path/a.txt"
-  printf 'nested\n' >"$path/dir/sub/nested.txt"
-  printf 'skip\n' >"$path/node_modules/ignored.js"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir/dir/sub" "$project_dir/node_modules"
+  printf 'file a\n' >"$project_dir/a.txt"
+  printf 'nested\n' >"$project_dir/dir/sub/nested.txt"
+  printf 'skip\n' >"$project_dir/node_modules/ignored.js"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git add a.txt dir/sub/nested.txt node_modules/ignored.js
     reset_clip_capture
@@ -397,7 +448,7 @@ test_lsclip_tree() {
 
   local output
   output="$(clip_contents)"
-  printf '%s\n' "$output" | command grep -F -- "=== GIT TREE: $path ===" >/dev/null || return 1
+  printf '%s\n' "$output" | command grep -F -- "=== GIT TREE: $project_dir ===" >/dev/null || return 1
   printf '%s\n' "$output" | command grep -Fx -- "./" >/dev/null || return 1
   printf '%s\n' "$output" | command grep -F -- "a.txt" >/dev/null || return 1
   printf '%s\n' "$output" | command grep -F -- "dir/sub/" >/dev/null || return 1
@@ -407,14 +458,14 @@ test_lsclip_tree() {
 }
 
 test_lsclip_max_depth() {
-  local repo path
+  local repo project_dir
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path/dir/sub"
-  printf 'root\n' >"$path/root.txt"
-  printf 'nested\n' >"$path/dir/sub/nested.txt"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir/dir/sub"
+  printf 'root\n' >"$project_dir/root.txt"
+  printf 'nested\n' >"$project_dir/dir/sub/nested.txt"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git add root.txt dir/sub/nested.txt
     reset_clip_capture
@@ -429,16 +480,16 @@ test_lsclip_max_depth() {
 }
 
 test_lsclip_dir_arg() {
-  local repo path output
+  local repo project_dir output
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path/dir"
-  printf 'root\n' >"$path/root.txt"
-  printf 'inner\n' >"$path/dir/inner.txt"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir/dir"
+  printf 'root\n' >"$project_dir/root.txt"
+  printf 'inner\n' >"$project_dir/dir/inner.txt"
   (
     cd "$repo" || return 1
     (
-      cd "$path" || return 1
+      cd "$project_dir" || return 1
       git init -q
       git add root.txt dir/inner.txt
     ) || return 1
@@ -447,7 +498,7 @@ test_lsclip_dir_arg() {
   ) || { rm -rf "$repo"; return 1; }
 
   output="$(clip_contents)"
-  printf '%s\n' "$output" | command grep -F -- "=== GIT TREE: $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "=== GIT TREE: $project_dir ===" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "root.txt" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "dir/" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "inner.txt" >/dev/null || { rm -rf "$repo"; return 1; }
@@ -468,14 +519,14 @@ test_lsclip_non_git() {
 }
 
 test_lscatclip_git() {
-  local repo path
+  local repo project_dir
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path"
-  printf 'alpha\nbeta\n' >"$path/keep.txt"
-  printf 'ignore me\n' >"$path/skip.log"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir"
+  printf 'alpha\nbeta\n' >"$project_dir/keep.txt"
+  printf 'ignore me\n' >"$project_dir/skip.log"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git add keep.txt skip.log
     reset_clip_capture
@@ -484,7 +535,7 @@ test_lscatclip_git() {
 
   local output
   output="$(clip_contents)"
-  printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || return 1
+  printf '%s\n' "$output" | command grep -F -- "=== $project_dir ===" >/dev/null || return 1
   printf '%s\n' "$output" | command grep -F -- "----- keep.txt -----" >/dev/null || return 1
   printf '%s\n' "$output" | command grep -F -- "alpha" >/dev/null || return 1
   ! printf '%s\n' "$output" | command grep -Fq -- "skip.log" || return 1
@@ -492,13 +543,13 @@ test_lscatclip_git() {
 }
 
 test_lscatclip_diff() {
-  local repo path output
+  local repo project_dir output
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path"
-  printf 'base\n' >"$path/base.txt"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir"
+  printf 'base\n' >"$project_dir/base.txt"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git config user.email "test@example.com"
     git config user.name "Test User"
@@ -506,15 +557,15 @@ test_lscatclip_diff() {
     git commit -m "base" -q
     git branch -M main
     git checkout -b feature -q
-    printf 'change\n' >>"$path/base.txt"
-    printf 'new\n' >"$path/new.txt"
+    printf 'change\n' >>"$project_dir/base.txt"
+    printf 'new\n' >"$project_dir/new.txt"
     git add new.txt
     reset_clip_capture
     lscatclip --diff --in '*.txt' >/dev/null || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   output="$(clip_contents)"
-  printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "=== $project_dir ===" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- base.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- new.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "=== GIT DIFF: main ===" >/dev/null || { rm -rf "$repo"; return 1; }
@@ -524,27 +575,27 @@ test_lscatclip_diff() {
 }
 
 test_lscatclip_diff_main_branch() {
-  local repo path output
+  local repo project_dir output
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path"
-  printf 'base\n' >"$path/base.txt"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir"
+  printf 'base\n' >"$project_dir/base.txt"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git config user.email "test@example.com"
     git config user.name "Test User"
     git add base.txt
     git commit -m "base" -q
     git branch -M main
-    printf 'worktree\n' >>"$path/base.txt"
-    printf 'scratch\n' >"$path/untracked.txt"
+    printf 'worktree\n' >>"$project_dir/base.txt"
+    printf 'scratch\n' >"$project_dir/untracked.txt"
     reset_clip_capture
     lscatclip --diff --in '*.txt' >/dev/null || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   output="$(clip_contents)"
-  printf '%s\n' "$output" | command grep -F -- "=== $path ===" >/dev/null || { rm -rf "$repo"; return 1; }
+  printf '%s\n' "$output" | command grep -F -- "=== $project_dir ===" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- base.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "----- untracked.txt -----" >/dev/null || { rm -rf "$repo"; return 1; }
   printf '%s\n' "$output" | command grep -F -- "=== GIT DIFF: main ===" >/dev/null || { rm -rf "$repo"; return 1; }
@@ -668,13 +719,13 @@ test_lscatclip_includes() {
 }
 
 test_lscatclip_no_matches() {
-  local repo path
+  local repo project_dir
   repo="$(make_tmp_dir)" || return 1
-  path="$repo/project"
-  mkdir -p "$path"
-  printf 'alpha\n' >"$path/keep.txt"
+  project_dir="$repo/project"
+  mkdir -p "$project_dir"
+  printf 'alpha\n' >"$project_dir/keep.txt"
   (
-    cd "$path" || return 1
+    cd "$project_dir" || return 1
     git init -q
     git add keep.txt
     reset_clip_capture
