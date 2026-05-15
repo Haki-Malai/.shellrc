@@ -136,8 +136,8 @@
   - For `git push -f` and `git push --force`, replace the force flag with `--force-with-lease` before delegating to upstream `git`.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .`, amends with that identity when found, and only pushes when `-f` or `--force` is passed.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
-  - After successful `git checkout` commands that switch away from a named branch whose name is at least 6 characters long, set `previousBranch` to the branch name from before the checkout.
-  - `git ri` fetches `origin main`, checks out local `main`, fast-forwards it to `origin/main`, checks out the original branch, then starts `git rebase -i main`.
+  - After successful `git checkout` commands that switch away from a named branch, set `previousBranch` to the branch name from before the checkout.
+  - `git ri` fetches `origin main`, checks out local `main`, fast-forwards it to `origin/main`, checks out the original branch, sets `previousBranch` to `main`, then starts `git rebase -i main`.
   - Delegate all other subcommands to upstream `git`.
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
@@ -155,8 +155,8 @@
   - `git yolo` stages all working tree changes under the current directory, may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and only force-with-lease-pushes to the configured upstream when `-f` or `--force` is passed.
 - Manual verification:
   - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
-  - In a disposable git repo with `main` and `feature` branches, run `git checkout main` from `feature` and confirm `echo "$previousBranch"` prints `feature`.
-  - In a disposable git repo where `origin/main` is ahead of local `main`, run `GIT_SEQUENCE_EDITOR=true git ri` from `feature` and confirm local `main` equals `origin/main`, current branch is still `feature`, and `git merge-base feature main` equals `main`.
+  - In a disposable git repo with `main` and `feature` branches, run `git checkout main` from `feature` and confirm `echo "$previousBranch"` prints `feature`; then run `git checkout "$previousBranch"` and confirm the current branch is `feature` and `previousBranch` is `main`.
+  - In a disposable git repo where `origin/main` is ahead of local `main`, run `GIT_SEQUENCE_EDITOR=true git ri` from `feature` and confirm local `main` equals `origin/main`, current branch is still `feature`, `previousBranch` is `main`, and `git merge-base feature main` equals `main`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
   - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; then run `git yolo -f` and confirm the local and remote branch point to the amended commit.
   - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch.

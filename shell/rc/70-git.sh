@@ -111,7 +111,7 @@ git() {
     command git --no-pager "$@"
     local rc=$?
     after="$(_git_current_branch)" || after=""
-    if [ "$rc" -eq 0 ] && [ -n "$before" ] && [ "$after" != "$before" ] && [ "${#before}" -ge 6 ]; then
+    if [ "$rc" -eq 0 ] && [ -n "$before" ] && [ "$after" != "$before" ]; then
       previousBranch="$before"
     fi
     return "$rc"

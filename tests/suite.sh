@@ -275,13 +275,16 @@ test_git_checkout_previous_branch() {
     git branch longfeature
     unset previousBranch
     git checkout short -q || return 1
-    [ -z "${previousBranch-}" ] || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
     git checkout feature -q || return 1
-    [ -z "${previousBranch-}" ] || return 1
+    [ "${previousBranch-}" = "short" ] || return 1
     git checkout main -q || return 1
     [ "${previousBranch-}" = "feature" ] || return 1
+    git checkout "$previousBranch" -q || return 1
+    [ "$(git symbolic-ref --quiet --short HEAD)" = "feature" ] || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
     git checkout does-not-exist >/dev/null 2>&1 && return 1
-    [ "${previousBranch-}" = "feature" ] || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
     git checkout sixsix -q || return 1
     [ "${previousBranch-}" = "feature" ] || return 1
     git checkout longfeature -q || return 1
@@ -325,7 +328,7 @@ test_git_ri_updates_main_before_rebase() {
     unset previousBranch
     GIT_SEQUENCE_EDITOR=true git ri || return 1
     [ "$(git symbolic-ref --quiet --short HEAD)" = "feature" ] || return 1
-    [ "${previousBranch-}" = "feature" ] || return 1
+    [ "${previousBranch-}" = "main" ] || return 1
     main_head="$(git rev-parse main)" || return 1
     [ "$main_head" = "$(git rev-parse origin/main)" ] || return 1
     merge_base="$(git merge-base feature main)" || return 1
