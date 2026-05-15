@@ -31,6 +31,34 @@ _git_current_branch() {
   command git symbolic-ref --quiet --short HEAD 2>/dev/null
 }
 
+_git_has_force_flag() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -f|--force)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+_git_push_with_lease_for_force() {
+  local args arg
+  args=()
+  for arg in "$@"; do
+    case "$arg" in
+      -f|--force)
+        args+=(--force-with-lease)
+        ;;
+      *)
+        args+=("$arg")
+        ;;
+    esac
+  done
+  command git --no-pager push "${args[@]}"
+}
+
 git() {
   if [ "$#" -eq 0 ]; then
     command git --no-pager
@@ -38,20 +66,27 @@ git() {
   fi
 
   if [ "$1" = "yolo" ]; then
-    local identity name email
+    local identity name email push_after_amend
+    shift
+    push_after_amend=1
+    if _git_has_force_flag "$@"; then
+      push_after_amend=0
+    fi
     identity="$(_git_yolo_malai_identity)" || identity=""
     if [ -n "$identity" ]; then
       name="${identity%%	*}"
       email="${identity#*	}"
       command git add . &&
-        GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend &&
-        command git push -f
+        GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend
     else
       command git add . &&
-        command git commit --no-edit --amend &&
-        command git push -f
+        command git commit --no-edit --amend
     fi
     local rc=$?
+    if [ "$rc" -eq 0 ] && [ "$push_after_amend" -eq 0 ]; then
+      command git push --force-with-lease
+      rc=$?
+    fi
     if [ "$rc" -eq 0 ]; then
       _git_print_commit_account
     fi
@@ -122,6 +157,12 @@ git() {
         return $?
         ;;
     esac
+  fi
+
+  if [ "$1" = "push" ] && _git_has_force_flag "$@"; then
+    shift
+    _git_push_with_lease_for_force "$@"
+    return $?
   fi
 
   command git --no-pager "$@"

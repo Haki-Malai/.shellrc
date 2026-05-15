@@ -38,7 +38,8 @@ tests_suite_main() {
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git ri updates main before interactive rebase" test_git_ri_updates_main_before_rebase
   run_test "git commit prints account" test_git_commit_account
-  run_test "git yolo amends and force pushes" test_git_yolo
+  run_test "git yolo amends and pushes only with force" test_git_yolo
+  run_test "git force push uses lease" test_git_push_force_uses_lease
   run_test "git stash includes untracked" test_git_stash_includes_untracked
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
@@ -355,7 +356,7 @@ test_git_commit_account() {
 }
 
 test_git_yolo() {
-  local repo remote project_dir local_head remote_head subject content worktree_status output author email color
+  local repo remote project_dir local_head remote_before remote_head subject content worktree_status output author email color
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   project_dir="$repo/project"
@@ -375,8 +376,21 @@ test_git_yolo() {
     git branch -M main
     git remote add origin "$remote"
     git push -u origin main -q
+    remote_before="$(git --git-dir="$remote" rev-parse main)" || return 1
     printf 'changed\n' >base.txt
     output="$(git yolo 2>&1)" || return 1
+    worktree_status="$(git status --short)"
+    [ -z "$worktree_status" ] || return 1
+    local_head="$(git rev-parse HEAD)"
+    remote_head="$(git --git-dir="$remote" rev-parse main)"
+    [ "$remote_head" = "$remote_before" ] || return 1
+    [ "$local_head" != "$remote_head" ] || return 1
+    subject="$(git show --format=%s --no-patch HEAD)"
+    [ "$subject" = "malai identity" ] || return 1
+    content="$(git show HEAD:base.txt)"
+    [ "$content" = "changed" ] || return 1
+    printf 'changed again\n' >base.txt
+    output="$(git yolo -f 2>&1)" || return 1
     worktree_status="$(git status --short)"
     [ -z "$worktree_status" ] || return 1
     local_head="$(git rev-parse HEAD)"
@@ -385,7 +399,7 @@ test_git_yolo() {
     subject="$(git show --format=%s --no-patch HEAD)"
     [ "$subject" = "malai identity" ] || return 1
     content="$(git show HEAD:base.txt)"
-    [ "$content" = "changed" ] || return 1
+    [ "$content" = "changed again" ] || return 1
     author="$(git show --format=%an --no-patch HEAD)"
     email="$(git show --format=%ae --no-patch HEAD)"
     [ "$author" = "Haki Malai" ] || return 1
@@ -394,6 +408,50 @@ test_git_yolo() {
     color="${color%% *}"
     printf '%s\n' "$output" | command grep -F -- "Commiter identity: " >/dev/null || return 1
     printf '%s\n' "$output" | command grep -F -- "$(printf '\033[0;1;38;5;%smHaki Malai\033[0m <haki@example.com>' "${color:-178}")" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
+}
+
+test_git_push_force_uses_lease() {
+  local repo remote project_dir other_dir remote_before remote_after
+  repo="$(make_tmp_dir)" || return 1
+  remote="$repo/origin.git"
+  project_dir="$repo/project"
+  other_dir="$repo/other"
+  git init --bare -q "$remote"
+  mkdir -p "$project_dir"
+  (
+    cd "$project_dir" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    git remote add origin "$remote"
+    git push -u origin main -q
+    git clone -q "$remote" "$other_dir"
+    (
+      cd "$other_dir" || return 1
+      git config user.email "other@example.com"
+      git config user.name "Other User"
+      printf 'remote\n' >remote.txt
+      git add remote.txt
+      git commit -m "remote" -q
+      git push origin main -q
+    ) || return 1
+    remote_before="$(git --git-dir="$remote" rev-parse main)" || return 1
+    printf 'local\n' >local.txt
+    git add local.txt
+    git commit -m "local" -q
+    git push -f origin main >/dev/null 2>&1 && return 1
+    remote_after="$(git --git-dir="$remote" rev-parse main)" || return 1
+    [ "$remote_after" = "$remote_before" ] || return 1
+    git push --force origin main >/dev/null 2>&1 && return 1
+    remote_after="$(git --git-dir="$remote" rev-parse main)" || return 1
+    [ "$remote_after" = "$remote_before" ] || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
@@ -805,6 +863,7 @@ test_prompt_contains_cat() {
   if [ -n "${BASH_VERSION-}" ]; then
     case "$PS1" in *"🐈"*) :;; *) return 1;; esac
   elif [ -n "${ZSH_VERSION-}" ]; then
+    _build_prompt
     case "$PROMPT" in *"🐈"*) :;; *) return 1;; esac
   fi
 }

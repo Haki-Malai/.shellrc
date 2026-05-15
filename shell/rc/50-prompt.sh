@@ -188,8 +188,6 @@ precmd() {
   _build_prompt
 }
 
-_build_prompt
-
 ZSH
 )"
   return 0

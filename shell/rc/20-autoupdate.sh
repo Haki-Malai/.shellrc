@@ -61,6 +61,9 @@ _dots_autoupdate_run() (
 )
 
 _dots_autoupdate_start() {
+  if [ -n "${ZSH_VERSION-}" ]; then
+    setopt LOCAL_OPTIONS NO_BG_NICE 2>/dev/null || true
+  fi
   # run in a subshell so the parent shell doesn't print job notifications
   ( _dots_autoupdate_run >/dev/null 2>&1 & )
 }
