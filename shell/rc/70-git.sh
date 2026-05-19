@@ -118,18 +118,27 @@ git() {
   fi
 
   if [ "$1" = "ri" ]; then
-    local branch
+    local branch base_branch
     shift
+    base_branch="main"
+    case "${1-}" in
+      ""|-*)
+        ;;
+      *)
+        base_branch="$1"
+        shift
+        ;;
+    esac
     branch="$(_git_current_branch)" || branch=""
     if [ -z "$branch" ]; then
       printf 'git ri: current HEAD is not a branch\n' >&2
       return 1
     fi
-    command git --no-pager fetch origin main &&
-      git checkout main &&
-      command git --no-pager merge --ff-only origin/main &&
+    command git --no-pager fetch origin "$base_branch" &&
+      git checkout "$base_branch" &&
+      command git --no-pager merge --ff-only "origin/$base_branch" &&
       git checkout "$branch" &&
-      command git --no-pager rebase -i "$@" main
+      command git --no-pager rebase -i "$@" "$base_branch"
     return $?
   fi
 

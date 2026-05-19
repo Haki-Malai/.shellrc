@@ -36,7 +36,7 @@ tests_suite_main() {
   run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
-  run_test "git ri updates main before interactive rebase" test_git_ri_updates_main_before_rebase
+  run_test "git ri updates base before interactive rebase" test_git_ri_updates_base_before_rebase
   run_test "git commit prints account" test_git_commit_account
   run_test "git yolo amends and pushes only with force" test_git_yolo
   run_test "git force push uses lease" test_git_push_force_uses_lease
@@ -294,8 +294,8 @@ test_git_checkout_previous_branch() {
   rm -rf "$repo"
 }
 
-test_git_ri_updates_main_before_rebase() {
-  local repo remote seed work main_head merge_base
+test_git_ri_updates_base_before_rebase() {
+  local repo remote seed work main_head dev_head merge_base
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   seed="$repo/seed"
@@ -318,6 +318,11 @@ test_git_ri_updates_main_before_rebase() {
     git add upstream.txt
     git commit -m "upstream" -q
     git push origin main -q
+    git checkout -b dev -q
+    printf 'dev\n' >dev.txt
+    git add dev.txt
+    git commit -m "dev" -q
+    git push origin dev -q
     cd "$work" || return 1
     git config user.email "test@example.com"
     git config user.name "Test User"
@@ -333,6 +338,18 @@ test_git_ri_updates_main_before_rebase() {
     [ "$main_head" = "$(git rev-parse origin/main)" ] || return 1
     merge_base="$(git merge-base feature main)" || return 1
     [ "$merge_base" = "$main_head" ] || return 1
+    git checkout -b feature_dev main -q
+    printf 'feature dev\n' >feature-dev.txt
+    git add feature-dev.txt
+    git commit -m "feature dev" -q
+    unset previousBranch
+    GIT_SEQUENCE_EDITOR=true git ri dev || return 1
+    [ "$(git symbolic-ref --quiet --short HEAD)" = "feature_dev" ] || return 1
+    [ "${previousBranch-}" = "dev" ] || return 1
+    dev_head="$(git rev-parse dev)" || return 1
+    [ "$dev_head" = "$(git rev-parse origin/dev)" ] || return 1
+    merge_base="$(git merge-base feature_dev dev)" || return 1
+    [ "$merge_base" = "$dev_head" ] || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
