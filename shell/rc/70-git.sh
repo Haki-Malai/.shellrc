@@ -43,6 +43,22 @@ _git_has_force_flag() {
   return 1
 }
 
+_git_has_staged_changes() {
+  command git diff --cached --quiet --exit-code
+  local rc=$?
+  case "$rc" in
+    0)
+      return 1
+      ;;
+    1)
+      return 0
+      ;;
+    *)
+      return "$rc"
+      ;;
+  esac
+}
+
 _git_push_with_lease_for_force() {
   local args arg
   args=()
@@ -66,21 +82,31 @@ git() {
   fi
 
   if [ "$1" = "yolo" ]; then
-    local identity name email push_after_amend
+    local identity name email push_after_amend staged_rc
     shift
     push_after_amend=1
     if _git_has_force_flag "$@"; then
       push_after_amend=0
     fi
+    _git_has_staged_changes
+    staged_rc=$?
+    case "$staged_rc" in
+      0)
+        ;;
+      1)
+        command git add . || return $?
+        ;;
+      *)
+        return "$staged_rc"
+        ;;
+    esac
     identity="$(_git_yolo_malai_identity)" || identity=""
     if [ -n "$identity" ]; then
       name="${identity%%	*}"
       email="${identity#*	}"
-      command git add . &&
-        GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend
+      GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend
     else
-      command git add . &&
-        command git commit --no-edit --amend
+      command git commit --no-edit --amend
     fi
     local rc=$?
     if [ "$rc" -eq 0 ] && [ "$push_after_amend" -eq 0 ]; then

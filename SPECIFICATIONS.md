@@ -134,14 +134,14 @@
   - Invoke `git` with `--no-pager` by default.
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
   - For `git push -f` and `git push --force`, replace the force flag with `--force-with-lease` before delegating to upstream `git`.
-  - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .`, amends with that identity when found, and only pushes when `-f` or `--force` is passed.
+  - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and only pushes when `-f` or `--force` is passed.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
   - After successful `git checkout` commands that switch away from a named branch, set `previousBranch` to the branch name from before the checkout.
   - `git ri [branch]` defaults `branch` to `main`; it fetches the selected branch from `origin`, checks out the local branch, fast-forwards it to `origin/<branch>`, checks out the original branch, sets `previousBranch` to the selected branch, then starts `git rebase -i <branch>`.
   - Delegate all other subcommands to upstream `git`.
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
-  - `git yolo` mirrors upstream output for the add and amend commit commands, plus the force-with-lease push command when `-f` or `--force` is passed.
+  - `git yolo` mirrors upstream output for the add command when it runs, the amend commit command, plus the force-with-lease push command when `-f` or `--force` is passed.
   - `git ri` mirrors upstream output for fetch, checkout, fast-forward merge, and interactive rebase commands against the selected base branch.
   - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
@@ -152,14 +152,14 @@
   - `git checkout` may update the current shell variable `previousBranch` after a successful branch switch.
   - `git ri` updates local refs from `origin`, may fast-forward the selected local base branch, and may rewrite the original branch through interactive rebase.
   - `git stash` default behavior includes untracked files in created stashes.
-  - `git yolo` stages all working tree changes under the current directory, may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and only force-with-lease-pushes to the configured upstream when `-f` or `--force` is passed.
+  - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and only force-with-lease-pushes to the configured upstream when `-f` or `--force` is passed.
 - Manual verification:
   - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
   - In a disposable git repo with `main` and `feature` branches, run `git checkout main` from `feature` and confirm `echo "$previousBranch"` prints `feature`; then run `git checkout "$previousBranch"` and confirm the current branch is `feature` and `previousBranch` is `main`.
   - In a disposable git repo where `origin/main` is ahead of local `main`, run `GIT_SEQUENCE_EDITOR=true git ri` from `feature` and confirm local `main` equals `origin/main`, current branch is still `feature`, `previousBranch` is `main`, and `git merge-base feature main` equals `main`.
   - In a disposable git repo where `origin/dev` is ahead of local `dev`, run `GIT_SEQUENCE_EDITOR=true git ri dev` from `feature` and confirm local `dev` equals `origin/dev`, current branch is still `feature`, `previousBranch` is `dev`, and `git merge-base feature dev` equals `dev`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
-  - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; then run `git yolo -f` and confirm the local and remote branch point to the amended commit.
+  - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then run `git yolo -f` and confirm the local and remote branch point to the amended commit.
   - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch.
 
 ### `gdc`

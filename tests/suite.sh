@@ -409,6 +409,21 @@ test_git_yolo() {
     [ "$subject" = "malai identity" ] || return 1
     content="$(git show HEAD:base.txt)"
     [ "$content" = "changed" ] || return 1
+    printf 'staged change\n' >base.txt
+    git add base.txt
+    printf 'unstaged change\n' >malai.txt
+    output="$(git yolo 2>&1)" || return 1
+    worktree_status="$(git status --short)"
+    [ "$worktree_status" = " M malai.txt" ] || return 1
+    subject="$(git show --format=%s --no-patch HEAD)"
+    [ "$subject" = "malai identity" ] || return 1
+    content="$(git show HEAD:base.txt)"
+    [ "$content" = "staged change" ] || return 1
+    content="$(git show HEAD:malai.txt)"
+    [ "$content" = "malai" ] || return 1
+    command git checkout -- malai.txt
+    worktree_status="$(git status --short)"
+    [ -z "$worktree_status" ] || return 1
     printf 'changed again\n' >base.txt
     output="$(git yolo -f 2>&1)" || return 1
     worktree_status="$(git status --short)"
