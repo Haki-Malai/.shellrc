@@ -59,6 +59,179 @@ _git_has_staged_changes() {
   esac
 }
 
+_git_lc_print_numstat() {
+  local label
+  label="${1-}"
+  awk -F '\t' -v label="$label" '
+    function number(value) {
+      return value ~ /^[0-9]+$/ ? value + 0 : 0
+    }
+    NF {
+      add = number($1)
+      remove = number($2)
+      path = $3
+      for (i = 4; i <= NF; i++) {
+        path = path "\t" $i
+      }
+      added += add
+      removed += remove
+      printf "\033[32m+%d\033[0m \033[31m-%d\033[0m %s\n", add, remove, path
+    }
+    END {
+      printf "\033[32m+%d\033[0m \033[31m-%d\033[0m", added, removed
+      if (label != "") {
+        printf " %s", label
+      }
+      printf "\n"
+    }
+  '
+}
+
+_git_lc_total_numstat() {
+  awk -F '\t' '
+    function number(value) {
+      return value ~ /^[0-9]+$/ ? value + 0 : 0
+    }
+    NF {
+      added += number($1)
+      removed += number($2)
+    }
+    END { printf "%d %d", added, removed }
+  '
+}
+
+_git_lc_print_total() {
+  printf '\033[32m+%d\033[0m \033[31m-%d\033[0m' "$1" "$2"
+  if [ -n "${3-}" ]; then
+    printf ' %s' "$3"
+  fi
+  printf '\n'
+}
+
+_git_lc_untracked_numstat() {
+  local file lines
+  command git ls-files --others --exclude-standard |
+    while IFS= read -r file; do
+      [ -f "$file" ] || continue
+      lines="$(awk 'END { print NR }' "./$file" 2>/dev/null)" || lines=0
+      case "$lines" in
+        ""|*[!0-9]*)
+          lines=0
+          ;;
+      esac
+      printf '%s\t0\t%s\n' "$lines" "$file"
+    done
+}
+
+_git_lc_current_numstat() {
+  local diff_output staged_rc untracked_output
+  _git_has_staged_changes
+  staged_rc=$?
+  case "$staged_rc" in
+    0)
+      diff_output="$(command git diff --cached --numstat)" || return $?
+      ;;
+    1)
+      if command git rev-parse --verify HEAD >/dev/null 2>&1; then
+        diff_output="$(command git diff --numstat HEAD)" || return $?
+      else
+        diff_output="$(command git diff --numstat)" || return $?
+      fi
+      ;;
+    *)
+      return "$staged_rc"
+      ;;
+  esac
+
+  if [ "$staged_rc" -eq 1 ]; then
+    untracked_output="$(_git_lc_untracked_numstat)" || return $?
+    if [ -n "$untracked_output" ]; then
+      if [ -n "$diff_output" ]; then
+        diff_output="${diff_output}
+${untracked_output}"
+      else
+        diff_output="$untracked_output"
+      fi
+    fi
+  fi
+  [ -n "$diff_output" ] && printf '%s\n' "$diff_output"
+}
+
+_git_lc_base_ref() {
+  local base candidate
+  base="${1:-main}"
+  for candidate in "origin/$base" "$base"; do
+    if command git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf 'git lc: unknown branch/ref: %s\n' "$base" >&2
+  return 1
+}
+
+_git_lc_verbose() {
+  local base_arg base_ref branch_added branch_numstat branch_removed branch_totals current_added current_numstat current_removed current_totals
+  base_arg="${1:-main}"
+  base_ref="$(_git_lc_base_ref "$base_arg")" || return $?
+  current_numstat="$(_git_lc_current_numstat)" || return $?
+  branch_numstat="$(command git diff --numstat "$base_ref"...HEAD)" || return $?
+
+  printf 'current\n'
+  printf '%s\n' "$current_numstat" | _git_lc_print_numstat "total"
+  current_totals="$(printf '%s\n' "$current_numstat" | _git_lc_total_numstat)" || return $?
+  current_added="${current_totals%% *}"
+  current_removed="${current_totals#* }"
+
+  printf '\nbranch (%s)\n' "$base_ref"
+  printf '%s\n' "$branch_numstat" | _git_lc_print_numstat "total"
+  branch_totals="$(printf '%s\n' "$branch_numstat" | _git_lc_total_numstat)" || return $?
+  branch_added="${branch_totals%% *}"
+  branch_removed="${branch_totals#* }"
+
+  printf '\nbranch + current\n'
+  _git_lc_print_total "$((branch_added + current_added))" "$((branch_removed + current_removed))" "total"
+}
+
+_git_lc() {
+  local base_arg base_arg_set current_numstat current_totals verbose
+  base_arg="main"
+  base_arg_set=0
+  verbose=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -v|--verbose)
+        verbose=1
+        ;;
+      -*)
+        printf 'git lc: unknown arg: %s\n' "$1" >&2
+        return 2
+        ;;
+      *)
+        if [ "$base_arg_set" -eq 1 ]; then
+          printf 'git lc: unknown arg: %s\n' "$1" >&2
+          return 2
+        fi
+        base_arg="$1"
+        base_arg_set=1
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$verbose" -eq 1 ]; then
+    _git_lc_verbose "$base_arg"
+    return $?
+  fi
+  if [ "$base_arg_set" -eq 1 ]; then
+    printf 'git lc: branch argument requires -v\n' >&2
+    return 2
+  fi
+  current_numstat="$(_git_lc_current_numstat)" || return $?
+  current_totals="$(printf '%s\n' "$current_numstat" | _git_lc_total_numstat)" || return $?
+  _git_lc_print_total "${current_totals%% *}" "${current_totals#* }"
+}
+
 _git_push_with_lease_for_force() {
   local args arg
   args=()
@@ -117,6 +290,12 @@ git() {
       _git_print_commit_account
     fi
     return "$rc"
+  fi
+
+  if [ "$1" = "lc" ]; then
+    shift
+    _git_lc "$@"
+    return $?
   fi
 
   if [ "$1" = "commit" ]; then

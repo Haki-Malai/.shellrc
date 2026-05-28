@@ -38,6 +38,7 @@ tests_suite_main() {
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git ri updates base before interactive rebase" test_git_ri_updates_base_before_rebase
   run_test "git commit prints account" test_git_commit_account
+  run_test "git lc counts staged or uncommitted lines" test_git_lc
   run_test "git yolo amends and pushes only with force" test_git_yolo
   run_test "git force push uses lease" test_git_push_force_uses_lease
   run_test "git stash includes untracked" test_git_stash_includes_untracked
@@ -370,6 +371,61 @@ test_git_commit_account() {
     color="${color%% *}"
     printf '%s\n' "$output" | command grep -F -- "Commiter identity: " >/dev/null || return 1
     printf '%s\n' "$output" | command grep -F -- "$(printf '\033[0;1;38;5;%smTest User\033[0m <test@example.com>' "${color:-178}")" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
+}
+
+test_git_lc() {
+  local expected repo output remote
+  repo="$(make_tmp_dir)" || return 1
+  remote="$repo/origin.git"
+  git init --bare -q "$remote"
+  (
+    cd "$repo" || return 1
+    mkdir project
+    cd project || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'one\ntwo\nthree\n' >base.txt
+    printf 'other\n' >other.txt
+    git add base.txt other.txt
+    git commit -m "base" -q
+    git branch -M main
+    git remote add origin "$remote"
+    git push -u origin main -q
+    git checkout -b feature -q
+    printf 'branch one\nbranch two\n' >branch.txt
+    git add branch.txt
+    git commit -m "branch" -q
+    git push origin feature -q
+    git branch dev origin/main >/dev/null
+    git push origin dev -q
+    printf 'one\nTWO\nthree\nfour\n' >base.txt
+    printf 'new one\nnew two\n' >new.txt
+    output="$(git lc)" || return 1
+    expected="$(printf '\033[32m+4\033[0m \033[31m-1\033[0m')"
+    [ "$output" = "$expected" ] || return 1
+    output="$(git lc -v)" || return 1
+    expected="$(printf 'current\n\033[32m+2\033[0m \033[31m-1\033[0m base.txt\n\033[32m+2\033[0m \033[31m-0\033[0m new.txt\n\033[32m+4\033[0m \033[31m-1\033[0m total\n\nbranch (origin/main)\n\033[32m+2\033[0m \033[31m-0\033[0m branch.txt\n\033[32m+2\033[0m \033[31m-0\033[0m total\n\nbranch + current\n\033[32m+6\033[0m \033[31m-1\033[0m total')"
+    [ "$output" = "$expected" ] || return 1
+    output="$(git lc -v dev)" || return 1
+    printf '%s\n' "$output" | command grep -F -- "branch (origin/dev)" >/dev/null || return 1
+    git add base.txt
+    printf 'changed other\n' >other.txt
+    output="$(git lc)" || return 1
+    expected="$(printf '\033[32m+2\033[0m \033[31m-1\033[0m')"
+    [ "$output" = "$expected" ] || return 1
+    output="$(git lc -v)" || return 1
+    expected="$(printf 'current\n\033[32m+2\033[0m \033[31m-1\033[0m base.txt\n\033[32m+2\033[0m \033[31m-1\033[0m total\n\nbranch (origin/main)\n\033[32m+2\033[0m \033[31m-0\033[0m branch.txt\n\033[32m+2\033[0m \033[31m-0\033[0m total\n\nbranch + current\n\033[32m+4\033[0m \033[31m-1\033[0m total')"
+    [ "$output" = "$expected" ] || return 1
+    if git lc dev >/dev/null 2>&1; then
+      return 1
+    fi
+    if git lc --bad >/dev/null 2>&1; then
+      return 1
+    fi
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
