@@ -154,7 +154,10 @@ ${untracked_output}"
       fi
     fi
   fi
-  [ -n "$diff_output" ] && printf '%s\n' "$diff_output"
+  if [ -n "$diff_output" ]; then
+    printf '%s\n' "$diff_output"
+  fi
+  return 0
 }
 
 _git_lc_base_ref() {

@@ -395,6 +395,12 @@ test_git_lc() {
     git branch -M main
     git remote add origin "$remote"
     git push -u origin main -q
+    output="$(git lc)" || return 1
+    expected="$(printf '\033[32m+0\033[0m \033[31m-0\033[0m')"
+    [ "$output" = "$expected" ] || return 1
+    output="$(git lc -v)" || return 1
+    expected="$(printf 'current\n\033[32m+0\033[0m \033[31m-0\033[0m total\n\nbranch (origin/main)\n\033[32m+0\033[0m \033[31m-0\033[0m total\n\nbranch + current\n\033[32m+0\033[0m \033[31m-0\033[0m total')"
+    [ "$output" = "$expected" ] || return 1
     git checkout -b feature -q
     printf 'branch one\nbranch two\n' >branch.txt
     git add branch.txt
