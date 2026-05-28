@@ -4,6 +4,8 @@
 This file is the repo-local operating contract for agents working in this repository (`.shellrc`).
 It is focused on correctness, traceability, minimal diffs, and test discipline.
 
+When the user asks to change agent behavior, instructions, workflow, or guidance, assume they mean updating `AGENTS.md` as the instruction file used by other AI agents, unless they explicitly name another target such as shared/global guidance.
+
 Precedence for repo work:
 1. Explicit user instruction in the current conversation.
 2. This `AGENTS.md`.
