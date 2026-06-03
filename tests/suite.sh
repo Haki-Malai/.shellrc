@@ -56,6 +56,7 @@ tests_suite_main() {
   run_test "lscatclip --out excludes" test_lscatclip_out
   run_test "lscatclip --out dir glob excludes subtree" test_lscatclip_out_dir_glob
   run_test "lscatclip --includes content filter" test_lscatclip_includes
+  run_test "lscatclip dry output skips clipboard" test_lscatclip_dry
   run_test "lscatclip no matches" test_lscatclip_no_matches
   run_test "lstype ranks lines" test_lstype_lines
   run_test "lstype ranks bytes" test_lstype_bytes
@@ -871,6 +872,28 @@ test_lscatclip_includes() {
   printf '%s\n' "$output" | command grep -F -- "----- keep.txt -----" >/dev/null || { rm -rf "$dir"; return 1; }
   ! printf '%s\n' "$output" | command grep -Fq -- "skip.txt" || { rm -rf "$dir"; return 1; }
   rm -rf "$dir"
+}
+
+test_lscatclip_dry() {
+  local base dir out_file output clip_output
+  base="$(make_tmp_dir)" || return 1
+  dir="$base/project"
+  mkdir -p "$dir" || { rm -rf "$base"; return 1; }
+  out_file="$base/out.txt"
+  (
+    cd "$dir" || return 1
+    printf 'keep\n' >keep.txt
+    printf 'sentinel\n' | clip || return 1
+    lscatclip --glob '*.txt' --dry >"$out_file" || return 1
+  ) || { rm -rf "$base"; return 1; }
+
+  output="$(cat "$out_file")"
+  clip_output="$(clip_contents)"
+  printf '%s\n' "$output" | command grep -E -- "^would copy [0-9]+ lines, [0-9]+ bytes to clipboard$" >/dev/null || { rm -rf "$base"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "----- keep.txt -----" || { rm -rf "$base"; return 1; }
+  ! printf '%s\n' "$output" | command grep -Fq -- "keep" || { rm -rf "$base"; return 1; }
+  [ "$clip_output" = "sentinel" ] || { rm -rf "$base"; return 1; }
+  rm -rf "$base"
 }
 
 test_lscatclip_no_matches() {

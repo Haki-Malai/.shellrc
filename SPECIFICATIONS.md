@@ -83,8 +83,10 @@
   - Collect files by git mode (`--git`/`--diff`) or glob mode (`--in`/`--glob`), apply excludes (`--out`), optional content filter (`--includes`), then copy concatenated file blocks to clipboard.
   - In `--diff` mode, select files from `git diff --name-only main` plus untracked files, and append `git diff --no-color main` output at the end.
   - Optional tree prelude via `--tree`.
+  - `--dry` prints would-copy counts instead of writing to the clipboard.
 - Stdout pattern:
   - On success: `copied <N> lines, <M> bytes to clipboard`.
+  - With `--dry`: `would copy <N> lines, <M> bytes to clipboard`.
   - Output payload in clipboard includes section markers:
     - `=== <cwd> ===`
     - `----- <relative-file> -----`
@@ -100,11 +102,13 @@
   - `1` runtime/context/no-match errors.
 - Side effects:
   - Clipboard write.
+  - No clipboard write with `--dry`.
 - Manual verification:
   - `lscatclip -h`
   - `lscatclip --git --in '*.sh'`
   - `lscatclip --diff --in '*.sh'`
   - `lscatclip --tree --glob '*.md'`
+  - `lscatclip --dry --glob '*.md'`
 
 ### `lstype`
 - Expected behavior:

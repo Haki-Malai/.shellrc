@@ -6,7 +6,7 @@ unset -f lscatclip 2>/dev/null || true
 type _shellrc_should_ignore >/dev/null 2>&1 || return 0
 
 lscatclip() {
-  local use_git=0 use_diff=0 show_tree=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
+  local use_git=0 use_diff=0 show_tree=0 dry_run=0 max_line_chars="${CLIPFILES_MAX_LINE_CHARS:-250000}" maxdepth="" target_dir="."
   local -a in_pats=() out_pats=() include_terms=()
   local dir_set=0
 
@@ -93,6 +93,7 @@ EOF
       --out)  shift; [ -n "${1-}" ] || { echo "missing CSV for --out" >&2; return 2; }; _append_csv_to_array "$1" out_pats ;;
       -i|--includes) shift; [ -n "${1-}" ] || { echo "missing CSV for --includes" >&2; return 2; }; _append_csv_to_array "$1" include_terms ;;
       --tree) show_tree=1 ;;
+      --dry) dry_run=1 ;;
       -n|--max-depth) shift; [[ "${1-}" =~ ^[0-9]+$ ]] && maxdepth="$1" ;;
       --)
         shift
@@ -100,7 +101,7 @@ EOF
         ;;
       -h|--help)
         cat <<'USAGE'
-Usage: lscatclip [--git] [--diff] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-i CSV|--includes CSV] [-n N|--max-depth N] [DIR]
+Usage: lscatclip [--git] [--diff] [--dry] [--in "*.ts,*.tsx" ...] [--out "*.md,*.test.ts" ...] [-i CSV|--includes CSV] [-n N|--max-depth N] [DIR]
 Aliases:
   --glob PATTERN  Add an include glob (alias of --in)
 Defaults:
@@ -110,6 +111,7 @@ Notes:
   - Excludes are applied after collection. Git mode ignores depth.
   - --out supports directory globs; trailing "/" or "/*" excludes the whole subtree (e.g., --out "tests/*").
   - --diff copies files changed in `git diff main`, includes untracked files, and appends `git diff main` output at the end.
+  - --dry prints would-copy counts instead of copying to the clipboard.
   - --includes filters to files whose contents contain any literal string in the CSV (binary files are skipped).
 USAGE
         return 0 ;;
@@ -301,12 +303,16 @@ USAGE
       } >>"$out"
     fi
 
-    # stats and copy
+    # stats, dry-run, and copy
     read -r over_count max_len <<EOF
 $(LC_ALL=C awk -v m="$max_line_chars" '{l=length($0); if(l>m)c++; if(l>mx)mx=l} END{print (c?c:0), (mx?mx:0)}' "$out" 2>/dev/null)
 EOF
-    clip <"$out" || { rm -f "$list" "$selected" "$out"; return 1; }
-    echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
+    if [ "$dry_run" -eq 1 ]; then
+      echo "would copy $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
+    else
+      clip <"$out" || { rm -f "$list" "$selected" "$out"; return 1; }
+      echo "copied $(wc -l <"$out" | tr -d ' ') lines, $(wc -c <"$out" | tr -d ' ') bytes to clipboard"
+    fi
     [ "$over_count" -gt 0 ] && echo "warning: $over_count lines exceed ${max_line_chars} (max $max_len)" >&2
     rm -f "$list" "$selected" "$out"
   }
