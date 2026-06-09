@@ -488,6 +488,10 @@ test_git_yolo() {
     worktree_status="$(git status --short)"
     [ -z "$worktree_status" ] || return 1
     printf 'changed again\n' >base.txt
+    printf '#!/bin/sh\nexit 1\n' >.git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+    printf '#!/bin/sh\nexit 1\n' >.git/hooks/pre-push
+    chmod +x .git/hooks/pre-push
     output="$(git yolo -f 2>&1)" || return 1
     worktree_status="$(git status --short)"
     [ -z "$worktree_status" ] || return 1
@@ -512,7 +516,7 @@ test_git_yolo() {
 }
 
 test_git_push_force_uses_lease() {
-  local repo remote project_dir other_dir remote_before remote_after
+  local repo remote project_dir other_dir remote_before remote_after local_head
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   project_dir="$repo/project"
@@ -550,6 +554,13 @@ test_git_push_force_uses_lease() {
     git push --force origin main >/dev/null 2>&1 && return 1
     remote_after="$(git --git-dir="$remote" rev-parse main)" || return 1
     [ "$remote_after" = "$remote_before" ] || return 1
+    git fetch origin main -q
+    printf '#!/bin/sh\nexit 1\n' >.git/hooks/pre-push
+    chmod +x .git/hooks/pre-push
+    git push -f origin main >/dev/null 2>&1 || return 1
+    local_head="$(git rev-parse main)" || return 1
+    remote_after="$(git --git-dir="$remote" rev-parse main)" || return 1
+    [ "$remote_after" = "$local_head" ] || return 1
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"

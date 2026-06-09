@@ -137,9 +137,9 @@
 - Expected behavior:
   - Invoke `git` with `--no-pager` by default.
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
-  - For `git push -f` and `git push --force`, replace the force flag with `--force-with-lease` before delegating to upstream `git`.
+  - For `git push -f` and `git push --force`, include `--no-verify` and replace the force flag with `--force-with-lease` before delegating to upstream `git`.
   - `git lc` counts added and removed lines in the current staged changes; when there are no staged changes, it counts all uncommitted tracked changes plus untracked text file lines. `git lc -v [branch]` also prints current per-file counts, branch diff counts against `origin/main` by default (or `origin/<branch>`/`<branch>` when provided), and a branch-plus-current total.
-  - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and only pushes when `-f` or `--force` is passed.
+  - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
   - After successful `git checkout` commands that switch away from a named branch, set `previousBranch` to the branch name from before the checkout.
   - `git ri [branch]` defaults `branch` to `main`; it fetches the selected branch from `origin`, checks out the local branch, fast-forwards it to `origin/<branch>`, checks out the original branch, sets `previousBranch` to the selected branch, then starts `git rebase -i <branch>`.
@@ -147,7 +147,7 @@
 - Output pattern:
   - Mirrors upstream `git` for the delegated command.
   - `git lc` prints one line as green `+<added>` then red `-<removed>`, for example `+4 -12`. `git lc -v [branch]` prints `current`, `branch (<ref>)`, and `branch + current` sections. Per-file rows are `+<added> -<removed> <path>`, and each section ends with or contains a `+<added> -<removed> total` row.
-  - `git yolo` mirrors upstream output for the add command when it runs, the amend commit command, plus the force-with-lease push command when `-f` or `--force` is passed.
+  - `git yolo` mirrors upstream output for the add command when it runs, the amend commit command, plus the `--no-verify --force-with-lease` push command when `-f` or `--force` is passed; the forced amend commit runs with `--no-verify`.
   - `git ri` mirrors upstream output for fetch, checkout, fast-forward merge, and interactive rebase commands against the selected base branch.
   - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
@@ -159,7 +159,7 @@
   - `git ri` updates local refs from `origin`, may fast-forward the selected local base branch, and may rewrite the original branch through interactive rebase.
   - `git stash` default behavior includes untracked files in created stashes.
   - `git lc` has no intended side effects.
-  - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and only force-with-lease-pushes to the configured upstream when `-f` or `--force` is passed.
+  - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease` to the configured upstream.
 - Manual verification:
   - `type git` (or `typeset -f git`) and confirm wrapper includes `--no-pager`.
   - In a disposable git repo with `main` and `feature` branches, run `git checkout main` from `feature` and confirm `echo "$previousBranch"` prints `feature`; then run `git checkout "$previousBranch"` and confirm the current branch is `feature` and `previousBranch` is `main`.
@@ -167,8 +167,8 @@
   - In a disposable git repo where `origin/dev` is ahead of local `dev`, run `GIT_SEQUENCE_EDITOR=true git ri dev` from `feature` and confirm local `dev` equals `origin/dev`, current branch is still `feature`, `previousBranch` is `dev`, and `git merge-base feature dev` equals `dev`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
   - In a git repo with a branch ahead of `origin/main`, unstaged tracked changes, and an untracked text file, run `git lc` and `git lc -v` and confirm current, branch, and branch-plus-current totals; then stage the tracked file, run `git lc` and `git lc -v`, and confirm only staged changes are included in the current and branch-plus-current totals. Run `git lc -v dev` and confirm the branch section uses `origin/dev` when it exists.
-  - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then run `git yolo -f` and confirm the local and remote branch point to the amended commit.
-  - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch.
+  - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then install failing pre-commit and pre-push hooks, run `git yolo -f`, and confirm the local and remote branch point to the amended commit.
+  - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch; then refresh the remote-tracking branch, install a failing pre-push hook, run `git push -f`, and confirm the push succeeds.
 
 ### `gdc`
 - Expected behavior:

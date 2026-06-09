@@ -248,7 +248,7 @@ _git_push_with_lease_for_force() {
         ;;
     esac
   done
-  command git --no-pager push "${args[@]}"
+  command git --no-pager push --no-verify "${args[@]}"
 }
 
 git() {
@@ -277,16 +277,21 @@ git() {
         ;;
     esac
     identity="$(_git_yolo_malai_identity)" || identity=""
+    local commit_args
+    commit_args=(--no-edit --amend)
+    if [ "$push_after_amend" -eq 0 ]; then
+      commit_args+=(--no-verify)
+    fi
     if [ -n "$identity" ]; then
       name="${identity%%	*}"
       email="${identity#*	}"
-      GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit --no-edit --amend
+      GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" command git commit "${commit_args[@]}"
     else
-      command git commit --no-edit --amend
+      command git commit "${commit_args[@]}"
     fi
     local rc=$?
     if [ "$rc" -eq 0 ] && [ "$push_after_amend" -eq 0 ]; then
-      command git push --force-with-lease
+      command git push --no-verify --force-with-lease
       rc=$?
     fi
     if [ "$rc" -eq 0 ]; then
