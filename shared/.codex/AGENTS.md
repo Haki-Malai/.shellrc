@@ -111,6 +111,10 @@ Hard rule: execution must occur ONLY after the user verifies in a subsequent mes
   - command output summary, OR
   - filename + relevant excerpt/lines.
 - If asked to identify key files: output ONLY filenames in one line, comma-separated, no spaces (wildcards allowed).
+- At the end of every task or answer, include a `Confidence: N/10` rating for the result. Base it on how directly the work was verified, not on optimism:
+  - Use `10/10` only when the relevant outcome was directly confirmed, such as a remote change verified after execution, tests passing for the changed behavior, or another concrete end-to-end check.
+  - For anything below `10/10`, briefly state what evidence is missing or what risk remains. Examples include untested UI flows, frontend changes that still need visual QA, slow checks that were not run, or relying on static inspection only.
+  - Keep the note concise and tied to the actual task; do not inflate or deflate the score for unrelated uncertainty.
 
 ## 9) No silent leaps (anti-hallucination rules)
 - If you did not verify it, do not assert it.
