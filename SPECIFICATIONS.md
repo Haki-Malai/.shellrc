@@ -138,6 +138,8 @@
   - Invoke `git` with `--no-pager` by default.
   - For stash push flows (`git stash`, `git stash -...`, `git stash push`, `git stash save`), include `--include-untracked` by default.
   - For `git push -f` and `git push --force`, include `--no-verify` and replace the force flag with `--force-with-lease` before delegating to upstream `git`.
+  - `git cdx apply <worktree-id>` uses the current repo top-level directory name as the project name, creates `/tmp/<worktree-id>.patch` from `$HOME/.codex/worktrees/<worktree-id>/<project-name>` with `git diff --binary`, then applies it to the current repo with `git apply --3way`.
+  - `git cdx apply` rejects missing/extra arguments, worktree IDs containing characters outside `[A-Za-z0-9_-]`, non-git current directories, and missing or non-git Codex worktree project directories.
   - `git lc` counts added and removed lines in the current staged changes; when there are no staged changes, it counts all uncommitted tracked changes plus untracked text file lines. `git lc -v [branch]` also prints current per-file counts, branch diff counts against `origin/main` by default (or `origin/<branch>`/`<branch>` when provided), and a branch-plus-current total.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
@@ -152,12 +154,14 @@
   - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
   - Mirrors upstream `git` for the delegated command.
+  - `git cdx apply` returns `2` for usage/argument validation errors and `1` for invalid repo/worktree context checks before delegation.
   - `git yolo` stops at the first failing command and returns that non-zero exit status.
 - Side effects:
   - Same as upstream `git` for the delegated command.
   - `git checkout` may update the current shell variable `previousBranch` after a successful branch switch.
   - `git ri` updates local refs from `origin`, may fast-forward the selected local base branch, and may rewrite the original branch through interactive rebase.
   - `git stash` default behavior includes untracked files in created stashes.
+  - `git cdx apply <worktree-id>` writes `/tmp/<worktree-id>.patch` and may change the current working tree through `git apply --3way`.
   - `git lc` has no intended side effects.
   - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease` to the configured upstream.
 - Manual verification:
@@ -166,6 +170,7 @@
   - In a disposable git repo where `origin/main` is ahead of local `main`, run `GIT_SEQUENCE_EDITOR=true git ri` from `feature` and confirm local `main` equals `origin/main`, current branch is still `feature`, `previousBranch` is `main`, and `git merge-base feature main` equals `main`.
   - In a disposable git repo where `origin/dev` is ahead of local `dev`, run `GIT_SEQUENCE_EDITOR=true git ri dev` from `feature` and confirm local `dev` equals `origin/dev`, current branch is still `feature`, `previousBranch` is `dev`, and `git merge-base feature dev` equals `dev`.
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
+  - From outside a git repo, run `git cdx apply c5de` and confirm it is refused. From a project repo with `$HOME/.codex/worktrees/c5de/<project-name>` containing a compatible diff, run `git cdx apply c5de` and confirm `/tmp/c5de.patch` is written and the patch is applied with `--3way`.
   - In a git repo with a branch ahead of `origin/main`, unstaged tracked changes, and an untracked text file, run `git lc` and `git lc -v` and confirm current, branch, and branch-plus-current totals; then stage the tracked file, run `git lc` and `git lc -v`, and confirm only staged changes are included in the current and branch-plus-current totals. Run `git lc -v dev` and confirm the branch section uses `origin/dev` when it exists.
   - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then install failing pre-commit and pre-push hooks, run `git yolo -f`, and confirm the local and remote branch point to the amended commit.
   - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch; then refresh the remote-tracking branch, install a failing pre-push hook, run `git push -f`, and confirm the push succeeds.
@@ -207,17 +212,18 @@
 ### `nvm` (conditional)
 - Expected behavior:
   - Available only if `$NVM_DIR/nvm.sh` exists.
-  - First call lazy-loads NVM without auto-selecting a Node version, then delegates arguments to real `nvm`.
+  - Loads NVM during startup without NVM's default auto-use behavior, then selects NVM's `stable` alias when it resolves.
 - Output pattern:
   - No project-specific stable output; delegated to upstream `nvm`.
 - Exit behavior:
-  - Mirrors upstream `nvm` behavior after load.
+  - Shell startup continues if NVM's `stable` alias does not resolve.
+  - Mirrors upstream `nvm` behavior after startup.
 - Side effects:
   - Loads NVM functions into current shell session.
-  - Does not run NVM's default `use` behavior during lazy-load.
+  - Prepends the selected NVM `stable` Node version to `PATH` when available.
 - Manual verification:
   - `type nvm` and `nvm --version` (when installed).
-  - In a clean shell without Node already on `PATH`, source `shell/rc/init.sh`, run `nvm current`, and confirm the loader does not switch to the NVM default alias before the explicit command.
+  - In a clean shell, source `shell/rc/init.sh`, run `nvm current`, and confirm it reports NVM's `stable` alias when available.
 
 ### `sdk` (conditional)
 - Expected behavior:

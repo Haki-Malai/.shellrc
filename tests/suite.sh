@@ -33,7 +33,7 @@ tests_suite_main() {
   run_test "pyenv skips foreign unwritable root" test_pyenv_skips_foreign_unwritable_root
   run_test "aliases register" test_aliases_exist
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
-  run_test "nvm lazy load skips auto-use" test_nvm_lazy_load_no_use
+  run_test "nvm uses stable on startup" test_nvm_uses_stable_on_startup
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git ri updates base before interactive rebase" test_git_ri_updates_base_before_rebase
@@ -42,6 +42,7 @@ tests_suite_main() {
   run_test "git yolo amends and pushes only with force" test_git_yolo
   run_test "git force push uses lease" test_git_push_force_uses_lease
   run_test "git stash includes untracked" test_git_stash_includes_untracked
+  run_test "git cdx applies codex worktree patch for current project" test_git_cdx_apply
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
   run_test "lsclip max depth" test_lsclip_max_depth
@@ -227,7 +228,7 @@ EOF
   rm -rf "$tmp"
 }
 
-test_nvm_lazy_load_no_use() {
+test_nvm_uses_stable_on_startup() {
   local tmp log
   tmp="$(make_tmp_dir)" || return 1
   log="$tmp/nvm.log"
@@ -248,6 +249,7 @@ EOF
   ) || { rm -rf "$tmp"; return 1; }
 
   command grep -Fx -- "source:--no-use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
+  command grep -Fx -- "call:use --silent stable" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   command grep -Fx -- "call:current" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
 }
@@ -587,6 +589,52 @@ test_git_stash_includes_untracked() {
   ) || { rm -rf "$repo"; return 1; }
 
   rm -rf "$repo"
+}
+
+test_git_cdx_apply() {
+  local not_repo project repo source worktree_root output
+  repo="$(make_tmp_dir)" || return 1
+  project="$repo/example-project"
+  not_repo="$repo/not-a-repo"
+  worktree_root="$HOME/.codex/worktrees/c5de"
+  source="$worktree_root/example-project"
+  rm -rf "$worktree_root"
+  mkdir -p "$project" "$not_repo" "$source" || { rm -rf "$repo" "$worktree_root"; return 1; }
+
+  (
+    cd "$project" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >app.txt
+    git add app.txt
+    git commit -m "base" -q
+
+    cd "$source" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >app.txt
+    git add app.txt
+    git commit -m "base" -q
+    printf 'changed\n' >app.txt
+
+    cd "$not_repo" || return 1
+    if output="$(git cdx apply c5de 2>&1)"; then
+      return 1
+    fi
+    printf '%s\n' "$output" | command grep -F -- "not a git repo" >/dev/null || return 1
+
+    cd "$project" || return 1
+    git cdx apply c5de || return 1
+    [ "$(cat app.txt)" = "changed" ] || return 1
+    [ -s /tmp/c5de.patch ] || return 1
+    if git cdx apply "bad/id" >/dev/null 2>&1; then
+      return 1
+    fi
+  ) || { rm -rf "$repo" "$worktree_root"; return 1; }
+
+  rm -rf "$repo" "$worktree_root"
 }
 
 test_clip_backend() {

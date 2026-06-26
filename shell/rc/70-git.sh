@@ -251,6 +251,59 @@ _git_push_with_lease_for_force() {
   command git --no-pager push --no-verify "${args[@]}"
 }
 
+_git_cdx_apply() {
+  local patch_file project_root project_name source_root worktree_id
+
+  if [ "$#" -ne 1 ]; then
+    printf 'usage: git cdx apply <worktree-id>\n' >&2
+    return 2
+  fi
+
+  worktree_id="$1"
+  case "$worktree_id" in
+    ""|*[!A-Za-z0-9_-]*)
+      printf 'git cdx: invalid worktree id: %s\n' "$worktree_id" >&2
+      return 2
+      ;;
+  esac
+
+  project_root="$(command git rev-parse --show-toplevel 2>/dev/null)" || {
+    printf 'git cdx: not a git repo\n' >&2
+    return 1
+  }
+  project_name="${project_root##*/}"
+  if [ -z "${HOME-}" ]; then
+    printf 'git cdx: HOME is not set\n' >&2
+    return 1
+  fi
+
+  source_root="$HOME/.codex/worktrees/$worktree_id/$project_name"
+  if ! command git -C "$source_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'git cdx: codex worktree project not found: %s\n' "$source_root" >&2
+    return 1
+  fi
+
+  patch_file="/tmp/$worktree_id.patch"
+  command git -C "$source_root" diff --binary >"$patch_file" || return $?
+  command git -C "$project_root" apply --3way "$patch_file"
+}
+
+_git_cdx() {
+  case "${1-}" in
+    apply)
+      shift
+      _git_cdx_apply "$@"
+      ;;
+    ""|-h|--help)
+      printf 'usage: git cdx apply <worktree-id>\n'
+      ;;
+    *)
+      printf 'git cdx: unknown subcommand: %s\n' "$1" >&2
+      return 2
+      ;;
+  esac
+}
+
 git() {
   if [ "$#" -eq 0 ]; then
     command git --no-pager
@@ -303,6 +356,12 @@ git() {
   if [ "$1" = "lc" ]; then
     shift
     _git_lc "$@"
+    return $?
+  fi
+
+  if [ "$1" = "cdx" ]; then
+    shift
+    _git_cdx "$@"
     return $?
   fi
 
