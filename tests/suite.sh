@@ -33,7 +33,7 @@ tests_suite_main() {
   run_test "pyenv skips foreign unwritable root" test_pyenv_skips_foreign_unwritable_root
   run_test "aliases register" test_aliases_exist
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
-  run_test "nvm uses stable on startup" test_nvm_uses_stable_on_startup
+  run_test "nvm selects newest installed version without eager load" test_nvm_selects_newest_installed_without_eager_load
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git ri updates base before interactive rebase" test_git_ri_updates_base_before_rebase
@@ -43,6 +43,7 @@ tests_suite_main() {
   run_test "git force push uses lease" test_git_push_force_uses_lease
   run_test "git stash includes untracked" test_git_stash_includes_untracked
   run_test "git cdx applies codex worktree patch for current project" test_git_cdx_apply
+  run_test "git cdx lists only dirty related worktrees" test_git_cdx_list
   run_test "clip writes via backend" test_clip_backend
   run_test "lsclip emits tree" test_lsclip_tree
   run_test "lsclip max depth" test_lsclip_max_depth
@@ -228,11 +229,13 @@ EOF
   rm -rf "$tmp"
 }
 
-test_nvm_uses_stable_on_startup() {
+test_nvm_selects_newest_installed_without_eager_load() {
   local tmp log
   tmp="$(make_tmp_dir)" || return 1
   log="$tmp/nvm.log"
-  mkdir -p "$tmp/nvm"
+  mkdir -p "$tmp/nvm/versions/node/v20.19.5/bin" "$tmp/nvm/versions/node/v25.9.0/bin"
+  touch "$tmp/nvm/versions/node/v20.19.5/bin/node" "$tmp/nvm/versions/node/v25.9.0/bin/node"
+  chmod +x "$tmp/nvm/versions/node/v20.19.5/bin/node" "$tmp/nvm/versions/node/v25.9.0/bin/node"
   cat >"$tmp/nvm/nvm.sh" <<'EOF'
 printf 'source:%s\n' "$*" >> "${SHELLRC_TEST_NVM_LOG:?}"
 nvm() {
@@ -245,12 +248,17 @@ EOF
     export SHELLRC_TEST_NVM_LOG="$log"
     unset -f nvm 2>/dev/null || true
     . "$DOTS_REPO_ROOT/shell/rc/60-devtools.sh"
+    [ ! -e "$log" ] || return 1
+    case "$PATH" in
+      "$tmp/nvm/versions/node/v25.9.0/bin:"*) ;;
+      *) return 1 ;;
+    esac
     nvm current
   ) || { rm -rf "$tmp"; return 1; }
 
   command grep -Fx -- "source:--no-use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
-  command grep -Fx -- "call:use --silent stable" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   command grep -Fx -- "call:current" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
+  ! command grep -F -- "call:use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
 }
 
@@ -618,6 +626,7 @@ test_git_cdx_apply() {
     git add app.txt
     git commit -m "base" -q
     printf 'changed\n' >app.txt
+    printf 'new file\n' >untracked.txt
 
     cd "$not_repo" || return 1
     if output="$(git cdx apply c5de 2>&1)"; then
@@ -628,6 +637,7 @@ test_git_cdx_apply() {
     cd "$project" || return 1
     git cdx apply c5de || return 1
     [ "$(cat app.txt)" = "changed" ] || return 1
+    [ "$(cat untracked.txt)" = "new file" ] || return 1
     [ -s /tmp/c5de.patch ] || return 1
     if git cdx apply "bad/id" >/dev/null 2>&1; then
       return 1
@@ -635,6 +645,75 @@ test_git_cdx_apply() {
   ) || { rm -rf "$repo" "$worktree_root"; return 1; }
 
   rm -rf "$repo" "$worktree_root"
+}
+
+test_git_cdx_list() {
+  local clean_worktree detached_worktree expected not_repo output project repo verbose_output
+  repo="$(make_tmp_dir)" || return 1
+  project="$repo/project with spaces"
+  clean_worktree="$repo/clean worktree"
+  detached_worktree="$repo/detached worktree"
+  not_repo="$repo/not-a-repo"
+  mkdir -p "$project" "$not_repo" || { rm -rf "$repo"; return 1; }
+
+  (
+    cd "$project" || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    git branch -M main
+    printf 'base\n' >tracked.txt
+    git add tracked.txt
+    git commit -m "base" -q
+    command git worktree add -q --detach "$detached_worktree" HEAD
+    command git worktree add -q -b clean-branch "$clean_worktree" HEAD
+    project="$(command git rev-parse --show-toplevel)"
+    clean_worktree="$(command git -C "$clean_worktree" rev-parse --show-toplevel)"
+    detached_worktree="$(command git -C "$detached_worktree" rev-parse --show-toplevel)"
+
+    printf 'first\n' >first.tsx
+    printf 'second\n' >second.tsx
+    printf 'notes\n' >notes.md
+    git add first.tsx second.tsx notes.md
+    printf 'detached change\n' >>"$detached_worktree/tracked.txt"
+    printf 'untracked\n' >"$detached_worktree/untracked.tsx"
+    printf 'notes\n' >"$detached_worktree/notes.md"
+
+    cd "$clean_worktree" || return 1
+    output="$(git cdx list)" || return 1
+    expected="$(printf '\033[1;36m%s\033[0m' "$project")"
+    printf '%s\n' "$output" | command grep -F -- "$expected" | command grep -F -- "[main]" >/dev/null || return 1
+    expected="$(printf '\033[1;33m2\033[0m \033[36m.tsx\033[0m  \033[1;33m1\033[0m \033[36m.md\033[0m  \033[2m(3 changes)\033[0m')"
+    printf '%s\n' "$output" | command grep -F -- "$expected" >/dev/null || return 1
+    expected="$(printf '\033[1;36m%s\033[0m' "$detached_worktree")"
+    printf '%s\n' "$output" | command grep -F -- "$expected" | command grep -F -- "(detached HEAD)" >/dev/null || return 1
+    expected="$(printf '\033[1;33m1\033[0m \033[36m.md\033[0m  \033[1;33m1\033[0m \033[36m.tsx\033[0m  \033[1;33m1\033[0m \033[36m.txt\033[0m  \033[2m(3 changes)\033[0m')"
+    printf '%s\n' "$output" | command grep -F -- "$expected" >/dev/null || return 1
+    ! printf '%s\n' "$output" | command grep -Fq -- "first.tsx" || return 1
+    ! printf '%s\n' "$output" | command grep -Fq -- "$clean_worktree" || return 1
+
+    verbose_output="$(git cdx list -v)" || return 1
+    expected="$(printf '\033[32mA  first.tsx\033[0m')"
+    printf '%s\n' "$verbose_output" | command grep -F -- "$expected" >/dev/null || return 1
+    expected="$(printf '\033[33m M tracked.txt\033[0m')"
+    printf '%s\n' "$verbose_output" | command grep -F -- "$expected" >/dev/null || return 1
+    expected="$(printf '\033[36m?? untracked.tsx\033[0m')"
+    printf '%s\n' "$verbose_output" | command grep -F -- "$expected" >/dev/null || return 1
+    ! printf '%s\n' "$verbose_output" | command grep -Fq -- "(3 changes)" || return 1
+    [ "$(git cdx list --verbose)" = "$verbose_output" ] || return 1
+    ! printf '%s\n' "$verbose_output" | command grep -Fq -- "$clean_worktree" || return 1
+    if git cdx list unexpected >/dev/null 2>&1; then
+      return 1
+    fi
+
+    cd "$not_repo" || return 1
+    if output="$(git cdx list 2>&1)"; then
+      return 1
+    fi
+    printf '%s\n' "$output" | command grep -F -- "not a git repo" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
 }
 
 test_clip_backend() {

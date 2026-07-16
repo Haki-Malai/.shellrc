@@ -251,6 +251,27 @@ _git_push_with_lease_for_force() {
   command git --no-pager push --no-verify "${args[@]}"
 }
 
+_git_cdx_write_patch() {
+  local diff_rc patch_file source_root untracked_file
+  source_root="$1"
+  patch_file="$2"
+
+  command git -C "$source_root" diff --binary >"$patch_file" || return $?
+  command git -C "$source_root" ls-files --others --exclude-standard -z |
+    while IFS= read -r -d '' untracked_file; do
+      [ -f "$source_root/$untracked_file" ] || continue
+      command git -C "$source_root" diff --binary --no-index -- /dev/null "$untracked_file" >>"$patch_file"
+      diff_rc=$?
+      case "$diff_rc" in
+        0|1)
+          ;;
+        *)
+          return "$diff_rc"
+          ;;
+      esac
+    done
+}
+
 _git_cdx_apply() {
   local patch_file project_root project_name source_root worktree_id
 
@@ -284,8 +305,125 @@ _git_cdx_apply() {
   fi
 
   patch_file="/tmp/$worktree_id.patch"
-  command git -C "$source_root" diff --binary >"$patch_file" || return $?
+  _git_cdx_write_patch "$source_root" "$patch_file" || return $?
   command git -C "$project_root" apply --3way "$patch_file"
+}
+
+_git_cdx_print_summary() {
+  awk '
+    function extension(path, name) {
+      sub(/^.* -> /, "", path)
+      gsub(/^"|"$/, "", path)
+      if (path ~ /\/$/) {
+        return "[dir]"
+      }
+      name = path
+      sub(/^.*\//, "", name)
+      if (name !~ /\./ || name ~ /^\.[^.]+$/) {
+        return "[no ext]"
+      }
+      sub(/^.*\./, ".", name)
+      return name
+    }
+    length($0) >= 4 {
+      ext = extension(substr($0, 4))
+      counts[ext]++
+      total++
+    }
+    END {
+      for (ext in counts) {
+        keys[++count] = ext
+      }
+      for (i = 1; i <= count; i++) {
+        for (j = i + 1; j <= count; j++) {
+          if (counts[keys[j]] > counts[keys[i]] ||
+              (counts[keys[j]] == counts[keys[i]] && keys[j] < keys[i])) {
+            key = keys[i]
+            keys[i] = keys[j]
+            keys[j] = key
+          }
+        }
+      }
+      printf "  "
+      for (i = 1; i <= count; i++) {
+        if (i > 1) {
+          printf "  "
+        }
+        printf "\033[1;33m%d\033[0m \033[36m%s\033[0m", counts[keys[i]], keys[i]
+      }
+      printf "  \033[2m(%d change%s)\033[0m\n", total, (total == 1 ? "" : "s")
+    }
+  '
+}
+
+_git_cdx_print_verbose_status() {
+  awk '
+    {
+      code = substr($0, 1, 2)
+      if (code == "??") color = 36
+      else if (code ~ /D/) color = 31
+      else if (code ~ /A/) color = 32
+      else if (code ~ /R|C/) color = 35
+      else color = 33
+      printf "\033[%dm%s\033[0m\n", color, $0
+    }
+  '
+}
+
+_git_cdx_list() {
+  local branch field head short_head verbose worktree worktree_status
+
+  verbose=0
+  case "$#:${1-}" in
+    0:)
+      ;;
+    1:-v|1:--verbose)
+      verbose=1
+      ;;
+    *)
+      printf 'usage: git cdx list [-v|--verbose]\n' >&2
+      return 2
+      ;;
+  esac
+  if ! command git rev-parse --show-toplevel >/dev/null 2>&1; then
+    printf 'git cdx: not a git repo\n' >&2
+    return 1
+  fi
+
+  branch=""
+  head=""
+  worktree=""
+  while IFS= read -r -d '' field; do
+    case "$field" in
+      worktree\ *)
+        worktree="${field#worktree }"
+        branch=""
+        head=""
+        ;;
+      HEAD\ *)
+        head="${field#HEAD }"
+        ;;
+      branch\ *)
+        branch="${field#branch refs/heads/}"
+        ;;
+      "")
+        [ -n "$worktree" ] || continue
+        worktree_status="$(command git -C "$worktree" status --short 2>/dev/null)" || continue
+        [ -n "$worktree_status" ] || continue
+        short_head="$(command git -C "$worktree" rev-parse --short "$head")" || return $?
+        if [ -n "$branch" ]; then
+          printf '\033[1;36m%s\033[0m  \033[33m%s\033[0m \033[32m[%s]\033[0m\n' "$worktree" "$short_head" "$branch"
+        else
+          printf '\033[1;36m%s\033[0m  \033[33m%s\033[0m \033[35m(detached HEAD)\033[0m\n' "$worktree" "$short_head"
+        fi
+        if [ "$verbose" -eq 1 ]; then
+          printf '%s\n' "$worktree_status" | _git_cdx_print_verbose_status
+        else
+          printf '%s\n' "$worktree_status" | _git_cdx_print_summary
+        fi
+        ;;
+    esac
+  done < <(command git worktree list --porcelain -z)
 }
 
 _git_cdx() {
@@ -294,8 +432,13 @@ _git_cdx() {
       shift
       _git_cdx_apply "$@"
       ;;
+    list)
+      shift
+      _git_cdx_list "$@"
+      ;;
     ""|-h|--help)
       printf 'usage: git cdx apply <worktree-id>\n'
+      printf '       git cdx list [-v|--verbose]\n'
       ;;
     *)
       printf 'git cdx: unknown subcommand: %s\n' "$1" >&2
