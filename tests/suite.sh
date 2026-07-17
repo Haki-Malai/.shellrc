@@ -35,6 +35,7 @@ tests_suite_main() {
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm selects newest installed version without eager load" test_nvm_selects_newest_installed_without_eager_load
   run_test "git wrapper defaults" test_git_wrapper_defaults
+  run_test "git branch lists all branches with PRs and cleans merged branches" test_git_branch_pr_and_clean
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
   run_test "git ri updates base before interactive rebase" test_git_ri_updates_base_before_rebase
   run_test "git commit prints account" test_git_commit_account
@@ -267,6 +268,104 @@ test_git_wrapper_defaults() {
   def="$(typeset -f git 2>/dev/null || true)"
   [ -n "$def" ] || return 1
   printf '%s\n' "$def" | command grep -F -- "command git --no-pager" >/dev/null || return 1
+}
+
+test_git_branch_pr_and_clean() {
+  local checked_worktree expected fakebin not_repo output remote repo
+  repo="$(make_tmp_dir)" || return 1
+  remote="$repo/origin.git"
+  fakebin="$repo/bin"
+  checked_worktree="$repo/checked-worktree"
+  not_repo="$repo/not-a-repo"
+  mkdir -p "$fakebin" "$not_repo" || { rm -rf "$repo"; return 1; }
+  cat >"$fakebin/gh" <<'EOF'
+#!/bin/sh
+state=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--state" ]; then
+    shift
+    state="${1-}"
+  fi
+  shift
+done
+case "$state" in
+  open)
+    printf '101\topen-pr\thttps://example.test/pr/101\n'
+    printf '999\tnot-local\thttps://example.test/pr/999\n'
+    ;;
+  merged)
+    printf '201\tmerged-gone\thttps://example.test/pr/201\n'
+    printf '202\tstill-remote\thttps://example.test/pr/202\n'
+    printf '203\tmerged-checked-out\thttps://example.test/pr/203\n'
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "$fakebin/gh"
+  command git init --bare -q "$remote" || { rm -rf "$repo"; return 1; }
+
+  (
+    cd "$repo" || return 1
+    mkdir project
+    cd project || return 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    printf 'base\n' >base.txt
+    git add base.txt
+    git commit -m "base" -q
+    git branch -M main
+    git remote add origin "$remote"
+    git push -u origin main -q
+    git branch open-pr
+    git branch merged-gone
+    git branch still-remote
+    git branch merged-checked-out
+    git branch no-pr
+    git push origin open-pr merged-gone still-remote merged-checked-out -q
+    command git worktree add -q "$checked_worktree" merged-checked-out
+    command git --git-dir="$remote" update-ref -d refs/heads/merged-gone
+    command git --git-dir="$remote" update-ref -d refs/heads/merged-checked-out
+    PATH="$fakebin:$PATH"
+    export PATH
+    hash -r 2>/dev/null || true
+
+    output="$(git branch --pr)" || return 1
+    [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 6 ] || return 1
+    expected="$(printf '  \033[35m#101\033[0m \033[1;32mopen-pr\033[0m \033[36mhttps://example.test/pr/101\033[0m')"
+    printf '%s\n' "$output" | command grep -Fx -- "$expected" >/dev/null || return 1
+    expected="$(printf '* \033[32mmain\033[0m')"
+    printf '%s\n' "$output" | command grep -Fx -- "$expected" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -Fx -- "  no-pr" >/dev/null || return 1
+    expected="$(printf '+ \033[36mmerged-checked-out\033[0m')"
+    printf '%s\n' "$output" | command grep -Fx -- "$expected" >/dev/null || return 1
+    ! printf '%s\n' "$output" | command grep -Fq -- "not-local" || return 1
+    git branch --list main | command grep -F -- "main" >/dev/null || return 1
+
+    output="$(printf 'n\n' | git branch --clean 2>&1)" || return 1
+    printf '%s\n' "$output" | command grep -F -- "#201" | command grep -F -- "merged-gone" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "Skipping checked-out branch: merged-checked-out" >/dev/null || return 1
+    ! printf '%s\n' "$output" | command grep -Fq -- "#202" || return 1
+    printf '%s\n' "$output" | command grep -F -- "Cancelled." >/dev/null || return 1
+    command git show-ref --verify --quiet refs/heads/merged-gone || return 1
+
+    output="$(printf 'yes\n' | git branch --clean 2>&1)" || return 1
+    printf '%s\n' "$output" | command grep -F -- "Deleted branch merged-gone" >/dev/null || return 1
+    ! command git show-ref --verify --quiet refs/heads/merged-gone || return 1
+    command git show-ref --verify --quiet refs/heads/still-remote || return 1
+    command git show-ref --verify --quiet refs/heads/merged-checked-out || return 1
+    command git show-ref --verify --quiet refs/heads/no-pr || return 1
+
+    cd "$not_repo" || return 1
+    if output="$(git branch --pr 2>&1)"; then
+      return 1
+    fi
+    printf '%s\n' "$output" | command grep -F -- "not a git repo" >/dev/null || return 1
+  ) || { rm -rf "$repo"; return 1; }
+
+  rm -rf "$repo"
 }
 
 test_git_checkout_previous_branch() {

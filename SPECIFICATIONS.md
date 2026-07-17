@@ -141,6 +141,8 @@
   - `git cdx apply <worktree-id>` uses the current repo top-level directory name as the project name, creates `/tmp/<worktree-id>.patch` from `$HOME/.codex/worktrees/<worktree-id>/<project-name>` with `git diff --binary` plus untracked-file patches, then applies it to the current repo with `git apply --3way`.
   - `git cdx apply` rejects missing/extra arguments, worktree IDs containing characters outside `[A-Za-z0-9_-]`, non-git current directories, and missing or non-git Codex worktree project directories.
   - `git cdx list [-v|--verbose]` lists only worktrees belonging to the current repository that have staged, unstaged, or untracked changes; clean worktrees are omitted.
+  - `git branch --pr` lists every local branch, preserving `*` for the current branch and `+` for branches checked out in other worktrees, and annotates branches whose head names match same-repository open pull requests.
+  - `git branch --clean` finds same-repository merged pull requests whose head names match local branches, verifies the corresponding branch is absent from the live `origin` remote, skips branches checked out in any worktree, and asks for confirmation before force-deleting the eligible local branches.
   - `git lc` counts added and removed lines in the current staged changes; when there are no staged changes, it counts all uncommitted tracked changes plus untracked text file lines. `git lc -v [branch]` also prints current per-file counts, branch diff counts against `origin/main` by default (or `origin/<branch>`/`<branch>` when provided), and a branch-plus-current total.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
@@ -154,10 +156,12 @@
   - `git ri` mirrors upstream output for fetch, checkout, fast-forward merge, and interactive rebase commands against the selected base branch.
   - `git cdx list` prints each dirty worktree as a colored `<path>  <short-head> [<branch>]` or `<path>  <short-head> (detached HEAD)` header, followed by colored file-extension counts sorted by count and a total change count.
   - `git cdx list -v` and `git cdx list --verbose` replace the extension summary with colored `git status --short` rows.
+  - In `git branch --pr`, ordinary branches use standard-style `<marker> <branch>` rows while open-PR branches use colored `<marker> #<pr-number> <branch> <pr-url>` rows. The candidate list from `git branch --clean` prints colored `#<pr-number> <branch> <pr-url>` rows and prompts `Force-delete <N> local branch(es)? [y/N]` before deletion.
   - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
   - Mirrors upstream `git` for the delegated command.
   - `git cdx apply` and `git cdx list` return `2` for usage/argument validation errors and `1` for invalid repo/worktree context checks before delegation.
+  - `git branch --pr` and `git branch --clean` return non-zero when outside a Git repository, when `gh` is unavailable, or when their Git/GitHub queries fail.
   - `git yolo` stops at the first failing command and returns that non-zero exit status.
 - Side effects:
   - Same as upstream `git` for the delegated command.
@@ -166,6 +170,7 @@
   - `git stash` default behavior includes untracked files in created stashes.
   - `git cdx apply <worktree-id>` writes `/tmp/<worktree-id>.patch` and may change the current working tree through `git apply --3way`.
   - `git cdx list` has no intended side effects.
+  - `git branch --pr` has no intended side effects. After explicit confirmation, `git branch --clean` force-deletes only the displayed eligible local branches; it does not delete remote branches and does not delete a branch checked out in any worktree.
   - `git lc` has no intended side effects.
   - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease` to the configured upstream.
 - Manual verification:
@@ -176,6 +181,7 @@
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
   - From outside a git repo, run `git cdx apply c5de` and confirm it is refused. From a project repo with `$HOME/.codex/worktrees/c5de/<project-name>` containing a compatible diff and an untracked file, run `git cdx apply c5de` and confirm `/tmp/c5de.patch` is written and the patch is applied with `--3way`, including the untracked file.
   - In a repo with clean and dirty linked worktrees, run `git cdx list` from any linked worktree and confirm only dirty worktrees appear with colored extension summaries; run `git cdx list -v` and confirm the summaries are replaced by colored short status rows.
+  - In a repository with local branches for open and merged same-repository PRs, run `git branch --pr` and confirm every local branch appears, with matching open PRs rendered as colored PR rows and current/linked-worktree markers preserved. Delete one merged PR's remote head, run `git branch --clean`, decline once and confirm no branch is deleted, then confirm and verify only that local branch is deleted; verify merged branches still on `origin` and branches checked out in linked worktrees remain.
   - In a git repo with a branch ahead of `origin/main`, unstaged tracked changes, and an untracked text file, run `git lc` and `git lc -v` and confirm current, branch, and branch-plus-current totals; then stage the tracked file, run `git lc` and `git lc -v`, and confirm only staged changes are included in the current and branch-plus-current totals. Run `git lc -v dev` and confirm the branch section uses `origin/dev` when it exists.
   - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then install failing pre-commit and pre-push hooks, run `git yolo -f`, and confirm the local and remote branch point to the amended commit.
   - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch; then refresh the remote-tracking branch, install a failing pre-push hook, run `git push -f`, and confirm the push succeeds.

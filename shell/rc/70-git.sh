@@ -251,6 +251,148 @@ _git_push_with_lease_for_force() {
   command git --no-pager push --no-verify "${args[@]}"
 }
 
+_git_branch_pr_rows() {
+  command gh pr list \
+    --state "$1" \
+    --limit 1000 \
+    --json number,headRefName,url,isCrossRepository \
+    --jq '.[] | select(.isCrossRepository == false) | [.number, .headRefName, .url] | @tsv'
+}
+
+_git_branch_pr_context() {
+  if ! command git rev-parse --git-dir >/dev/null 2>&1; then
+    printf 'git branch: not a git repo\n' >&2
+    return 1
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    printf 'git branch: gh is required\n' >&2
+    return 1
+  fi
+}
+
+_git_branch_print_pr() {
+  printf '\033[35m#%s\033[0m \033[1;32m%s\033[0m \033[36m%s\033[0m\n' "$1" "$2" "$3"
+}
+
+_git_branch_pr() {
+  local branch branch_rows marker number pr_row rows tab url worktree_path
+  _git_branch_pr_context || return $?
+  rows="$(_git_branch_pr_rows open)" || return $?
+  branch_rows="$(command git for-each-ref --format='%(HEAD)%09%(refname:short)%09%(worktreepath)' refs/heads)" || return $?
+  tab="$(printf '\t')"
+
+  while IFS="$tab" read -r marker branch worktree_path; do
+    [ -n "$branch" ] || continue
+    if [ "$marker" != "*" ] && [ -n "$worktree_path" ]; then
+      marker="+"
+    fi
+    pr_row="$(printf '%s\n' "$rows" | awk -F '\t' -v branch="$branch" '$2 == branch { print; exit }')"
+    if [ -n "$pr_row" ]; then
+      IFS="$tab" read -r number branch url <<EOF
+$pr_row
+EOF
+      printf '%s ' "$marker"
+      _git_branch_print_pr "$number" "$branch" "$url"
+    elif [ "$marker" = "*" ]; then
+      printf '* \033[32m%s\033[0m\n' "$branch"
+    elif [ "$marker" = "+" ]; then
+      printf '+ \033[36m%s\033[0m\n' "$branch"
+    else
+      printf '  %s\n' "$branch"
+    fi
+  done <<EOF
+$branch_rows
+EOF
+}
+
+_git_branch_is_checked_out() {
+  command git worktree list --porcelain |
+    awk -v ref="refs/heads/$1" '
+      $1 == "branch" && $2 == ref { found = 1 }
+      END { exit found ? 0 : 1 }
+    '
+}
+
+_git_branch_remote_exists() {
+  printf '%s\n' "$1" |
+    awk -v ref="refs/heads/$2" '
+      $2 == ref { found = 1 }
+      END { exit found ? 0 : 1 }
+    '
+}
+
+_git_branch_rows_include() {
+  printf '%s\n' "$1" |
+    awk -F '\t' -v branch="$2" '
+      $2 == branch { found = 1 }
+      END { exit found ? 0 : 1 }
+    '
+}
+
+_git_branch_clean() {
+  local branch candidate_count candidate_rows number remote_heads reply row rows tab url
+  _git_branch_pr_context || return $?
+  if ! command git remote get-url origin >/dev/null 2>&1; then
+    printf 'git branch --clean: origin remote not found\n' >&2
+    return 1
+  fi
+
+  remote_heads="$(command git ls-remote --heads origin)" || return $?
+  rows="$(_git_branch_pr_rows merged)" || return $?
+  candidate_count=0
+  candidate_rows=""
+  tab="$(printf '\t')"
+
+  while IFS="$tab" read -r number branch url; do
+    [ -n "$branch" ] || continue
+    command git show-ref --verify --quiet "refs/heads/$branch" || continue
+    _git_branch_remote_exists "$remote_heads" "$branch" && continue
+    _git_branch_rows_include "$candidate_rows" "$branch" && continue
+    if _git_branch_is_checked_out "$branch"; then
+      printf '\033[33mSkipping checked-out branch: %s\033[0m\n' "$branch" >&2
+      continue
+    fi
+    row="$(printf '%s\t%s\t%s' "$number" "$branch" "$url")"
+    if [ -n "$candidate_rows" ]; then
+      candidate_rows="${candidate_rows}
+${row}"
+    else
+      candidate_rows="$row"
+    fi
+    candidate_count=$((candidate_count + 1))
+  done <<EOF
+$rows
+EOF
+
+  if [ "$candidate_count" -eq 0 ]; then
+    printf '\033[2mNo merged local PR branches with deleted origin branches.\033[0m\n'
+    return 0
+  fi
+
+  printf 'Local branches eligible for deletion:\n'
+  while IFS="$tab" read -r number branch url; do
+    _git_branch_print_pr "$number" "$branch" "$url"
+  done <<EOF
+$candidate_rows
+EOF
+  printf 'Force-delete %d local branch%s? [y/N] ' "$candidate_count" "$([ "$candidate_count" -eq 1 ] || printf 'es')"
+  IFS= read -r reply || reply=""
+  case "$reply" in
+    y|Y|yes|YES|Yes)
+      ;;
+    *)
+      printf 'Cancelled.\n'
+      return 0
+      ;;
+  esac
+
+  while IFS="$tab" read -r number branch url; do
+    command git branch -D -- "$branch" || return $?
+  done <<EOF
+$candidate_rows
+EOF
+}
+
 _git_cdx_write_patch() {
   local diff_rc patch_file source_root untracked_file
   source_root="$1"
@@ -506,6 +648,19 @@ git() {
     shift
     _git_cdx "$@"
     return $?
+  fi
+
+  if [ "$1" = "branch" ]; then
+    case "$#:${2-}" in
+      2:--pr)
+        _git_branch_pr
+        return $?
+        ;;
+      2:--clean)
+        _git_branch_clean
+        return $?
+        ;;
+    esac
   fi
 
   if [ "$1" = "commit" ]; then
