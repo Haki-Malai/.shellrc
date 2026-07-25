@@ -14,6 +14,19 @@
 
 ## 3) Startup Behavior
 
+### Directory history variable
+- Expected behavior:
+  - After a successful `cd`, set `lastDir` to the directory from before the change.
+  - After a failed `cd`, leave `lastDir` unchanged.
+- Output pattern:
+  - Mirrors the shell builtin `cd` output.
+- Exit behavior:
+  - Mirrors the shell builtin `cd` exit status.
+- Side effects:
+  - A successful `cd` may update the current shell variable `lastDir`.
+- Manual verification:
+  - Run `cd /tmp`, then confirm `echo "$lastDir"` prints the directory from which `cd /tmp` was invoked.
+
 ### User switch safety
 - Expected behavior:
   - During interactive startup, if the current directory is inside another user's home path (`/Users/<user>/...` on macOS or `/home/<user>/...` on Linux), change directory to the current user's home directory when it can be resolved.

@@ -29,6 +29,7 @@ tests_suite_main() {
   tests__shell="${BASH_VERSION:+bash}${ZSH_VERSION:+zsh}"
 
   run_test "env loads core modules" test_env_loads
+  run_test "cd tracks previous directory" test_cd_tracks_previous_directory
   run_test "user switch moves out of foreign home" test_user_switch_moves_out_of_foreign_home
   run_test "pyenv skips foreign unwritable root" test_pyenv_skips_foreign_unwritable_root
   run_test "aliases register" test_aliases_exist
@@ -105,6 +106,28 @@ test_env_loads() {
   type lsclip >/dev/null 2>&1 || return 1
   type lscatclip >/dev/null 2>&1 || return 1
   type clip >/dev/null 2>&1 || return 1
+}
+
+test_cd_tracks_previous_directory() {
+  local base first second initial
+  base="$(make_tmp_dir)" || return 1
+  first="$base/first"
+  second="$base/second"
+  mkdir -p "$first" "$second" || { rm -rf "$base"; return 1; }
+
+  (
+    initial="$PWD"
+    unset lastDir
+    cd "$first" || return 1
+    [ "$lastDir" = "$initial" ] || return 1
+    cd "$second" || return 1
+    [ "$lastDir" = "$first" ] || return 1
+    cd "$base/missing" >/dev/null 2>&1 && return 1
+    [ "$PWD" = "$second" ] || return 1
+    [ "$lastDir" = "$first" ] || return 1
+  ) || { rm -rf "$base"; return 1; }
+
+  rm -rf "$base"
 }
 
 test_user_switch_moves_out_of_foreign_home() {
