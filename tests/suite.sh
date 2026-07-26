@@ -35,6 +35,7 @@ tests_suite_main() {
   run_test "aliases register" test_aliases_exist
   run_test "autoupdate starts on each init" test_autoupdate_runs_per_init
   run_test "nvm selects newest installed version without eager load" test_nvm_selects_newest_installed_without_eager_load
+  run_test "gh workflow run watches dispatched run" test_gh_workflow_run_watch
   run_test "git wrapper defaults" test_git_wrapper_defaults
   run_test "git branch lists all branches with PRs and cleans merged branches" test_git_branch_pr_and_clean
   run_test "git checkout tracks previous branch" test_git_checkout_previous_branch
@@ -283,6 +284,70 @@ EOF
   command grep -Fx -- "source:--no-use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   command grep -Fx -- "call:current" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
   ! command grep -F -- "call:use" "$log" >/dev/null || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+}
+
+test_gh_workflow_run_watch() {
+  local expected fakebin log output rc tmp
+  tmp="$(make_tmp_dir)" || return 1
+  fakebin="$tmp/bin"
+  log="$tmp/gh.log"
+  mkdir -p "$fakebin" || { rm -rf "$tmp"; return 1; }
+
+  cat >"$fakebin/gh" <<'EOF'
+#!/bin/sh
+printf '%s' "${1-}" >> "${SHELLRC_TEST_GH_LOG:?}"
+shift || true
+for arg in "$@"; do
+  printf '\t%s' "$arg" >> "$SHELLRC_TEST_GH_LOG"
+done
+printf '\n' >> "$SHELLRC_TEST_GH_LOG"
+
+if [ "${1-}" = "run" ] && [ "${2-}" = "fail.yml" ]; then
+  exit 7
+fi
+if [ "${1-}" = "run" ]; then
+  printf '%s\n' 'https://github.com/Judgmatic/WC-pipeline/actions/runs/30172856146'
+  exit 0
+fi
+if [ "${1-}" = "watch" ]; then
+  printf 'watching %s\n' "${2-}"
+  exit 0
+fi
+exit 2
+EOF
+  chmod +x "$fakebin/gh"
+
+  (
+    PATH="$fakebin:$PATH"
+    SHELLRC_TEST_GH_LOG="$log"
+    export PATH SHELLRC_TEST_GH_LOG
+    hash -r 2>/dev/null || true
+
+    output="$(gh workflow run run-pipeline.yml --repo Judgmatic/WC-pipeline --ref main -f effort=medium -w)" || return 1
+    printf '%s\n' "$output" | command grep -Fx -- 'https://github.com/Judgmatic/WC-pipeline/actions/runs/30172856146' >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -Fx -- 'watching 30172856146' >/dev/null || return 1
+    expected="$(printf 'workflow\trun\trun-pipeline.yml\t--repo\tJudgmatic/WC-pipeline\t--ref\tmain\t-f\teffort=medium')"
+    [ "$(command sed -n '1p' "$log")" = "$expected" ] || return 1
+    expected="$(printf 'run\twatch\t30172856146\t--repo\tJudgmatic/WC-pipeline')"
+    [ "$(command sed -n '2p' "$log")" = "$expected" ] || return 1
+
+    : > "$log"
+    gh workflow run other.yml -f target=review_pr >/dev/null || return 1
+    expected="$(printf 'workflow\trun\tother.yml\t-f\ttarget=review_pr')"
+    [ "$(command sed -n '1p' "$log")" = "$expected" ] || return 1
+    [ "$(command wc -l < "$log" | tr -d ' ')" = "1" ] || return 1
+
+    : > "$log"
+    if gh workflow run fail.yml -w >/dev/null 2>&1; then
+      return 1
+    else
+      rc=$?
+    fi
+    [ "$rc" -eq 7 ] || return 1
+    [ "$(command wc -l < "$log" | tr -d ' ')" = "1" ] || return 1
+  ) || { rm -rf "$tmp"; return 1; }
+
   rm -rf "$tmp"
 }
 

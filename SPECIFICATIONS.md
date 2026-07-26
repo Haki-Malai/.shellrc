@@ -146,6 +146,22 @@
   - `lstype -h`
   - `lstype --bytes --limit 5`
 
+### `gh` (wrapper)
+- Expected behavior:
+  - Delegate commands to upstream `gh` unchanged by default.
+  - For `gh workflow run ... -w`, remove the custom `-w` flag, dispatch the workflow, extract the new run ID from the returned Actions URL, then run `gh run watch <run-id>` until completion.
+  - Forward `-R|--repo` from the dispatch command to `gh run watch`.
+- Output pattern:
+  - Mirrors upstream output for the workflow dispatch followed by `gh run watch` progress.
+- Exit behavior:
+  - Without `-w`, mirrors upstream `gh`.
+  - With `-w`, returns the dispatch failure status, returns `1` when the new run ID cannot be determined, or mirrors `gh run watch` after a successful dispatch.
+- Side effects:
+  - Same as upstream `gh workflow run`: creates a remote workflow run.
+  - With `-w`, performs read-only polling until that run completes.
+- Manual verification:
+  - Run `gh workflow run <workflow> -R <owner/repo> -w` and confirm it dispatches the workflow and immediately watches the returned run until completion.
+
 ### `git` (wrapper)
 - Expected behavior:
   - Invoke `git` with `--no-pager` by default.
