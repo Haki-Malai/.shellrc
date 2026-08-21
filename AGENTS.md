@@ -4,7 +4,7 @@
 This file is the repo-local operating contract for agents working in this repository (`.shellrc`).
 It is focused on correctness, traceability, minimal diffs, and test discipline.
 
-Edit this file only for behavior, instructions, workflow, or guidance specific to this repository. Requests mentioning common, shared, or global agents, or `.codex/AGENTS.md`, target `$HOME/.codex/AGENTS.md` instead. An explicit path always wins; if the intended scope is still ambiguous, ask before editing either file.
+Edit this file only for behavior, instructions, workflow, or guidance specific to this repository. Requests mentioning common, shared, or global agents, or `.codex/AGENTS.md`, target `shared/.codex/AGENTS.md`, which is the repository source copied to `$HOME/.codex/AGENTS.md` at shell startup. Do not edit the generated home copy when the shared source is available. An explicit path always wins; if the intended scope is still ambiguous, ask before editing either file.
 
 Precedence for repo work:
 1. Explicit user instruction in the current conversation.
