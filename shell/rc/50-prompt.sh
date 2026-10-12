@@ -1,5 +1,81 @@
 # shell/rc/50-prompt.sh
 
+# The initial check waits for Docker; later prompt checks run in the background.
+_shellrc_colima_cleanup() {
+  if [ -n "${_SHELLRC_COLIMA_PID-}" ]; then
+    kill "$_SHELLRC_COLIMA_PID" 2>/dev/null || true
+  fi
+  [ -z "${_SHELLRC_COLIMA_CACHE-}" ] || rm -rf -- "$_SHELLRC_COLIMA_CACHE"
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+}
+
+_shellrc_colima_worker() {
+  local cache="$1" storage="$2" generation="$3" state=unavailable response
+  if ! command -v curl >/dev/null 2>&1; then
+    state=unknown
+  elif response="$(curl --silent --fail --max-time 1 --unix-socket "$storage/default/docker.sock" http://localhost/_ping)" && [ "$response" = OK ]; then
+    state=healthy
+  fi
+  printf '%s %s\n' "$SECONDS" "$state" >"$cache/result.$generation.tmp" &&
+    mv -f -- "$cache/result.$generation.tmp" "$cache/result.$generation"
+}
+
+_shellrc_colima_update() {
+  [ -z "${ZSH_VERSION-}" ] || setopt local_options no_monitor no_notify
+  local storage="${COLIMA_HOME:-$HOME/.colima}" checked state
+  _SHELLRC_COLIMA_COLOR=244
+  _SHELLRC_COLIMA_ICON='?'
+  unset _SHELLRC_COLIMA_VISIBLE
+  if [ -z "${_SHELLRC_COLIMA_CACHE-}" ]; then
+    _SHELLRC_COLIMA_CACHE="$(mktemp -d /tmp/shellrc-colima.XXXXXX)" || return 0
+    _SHELLRC_COLIMA_GENERATION=0
+    _SHELLRC_COLIMA_LAST=-5
+  fi
+  if [ "${_SHELLRC_COLIMA_HOME-}" != "$storage" ]; then
+    _SHELLRC_COLIMA_HOME="$storage"
+    _SHELLRC_COLIMA_GENERATION=$(( ${_SHELLRC_COLIMA_GENERATION:-0} + 1 ))
+    _SHELLRC_COLIMA_LAST=-5
+  fi
+  if [ -r "$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION" ]; then
+    read -r checked state <"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+    if [ "$(( SECONDS - checked ))" -lt 5 ]; then
+      case "$state" in
+        healthy) _SHELLRC_COLIMA_COLOR=46; _SHELLRC_COLIMA_ICON='●' ;;
+        unavailable) _SHELLRC_COLIMA_COLOR=196; _SHELLRC_COLIMA_ICON='●' ;;
+      esac
+    fi
+  fi
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] || _SHELLRC_COLIMA_VISIBLE="$_SHELLRC_COLIMA_ICON"
+  if [ -n "${_SHELLRC_COLIMA_PID-}" ] && kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null; then
+    return 0
+  fi
+  if [ "$(( SECONDS - _SHELLRC_COLIMA_LAST ))" -ge 5 ]; then
+    _SHELLRC_COLIMA_LAST=$SECONDS
+    if [ "${1-}" = --sync ]; then
+      _shellrc_colima_worker "$_SHELLRC_COLIMA_CACHE" "$storage" "$_SHELLRC_COLIMA_GENERATION" >/dev/null 2>&1 || true
+      _shellrc_colima_update
+      return 0
+    fi
+    {
+      if [ -n "${ZSH_VERSION-}" ]; then
+        # Keep Zsh's detached-job syntax out of the shared Bash parser.
+        eval '_shellrc_colima_worker "$_SHELLRC_COLIMA_CACHE" "$storage" "$_SHELLRC_COLIMA_GENERATION" >/dev/null 2>&1 &!'
+      else
+        _shellrc_colima_worker "$_SHELLRC_COLIMA_CACHE" "$storage" "$_SHELLRC_COLIMA_GENERATION" >/dev/null 2>&1 &
+      fi
+      _SHELLRC_COLIMA_PID=$!
+      [ -n "${ZSH_VERSION-}" ] || disown "$_SHELLRC_COLIMA_PID" 2>/dev/null || true
+    } >/dev/null 2>&1
+  fi
+  return 0
+}
+
+_shellrc_colima_prompt_tick() {
+  _SHELLRC_PROMPT_EXIT_STATUS=$?
+  _shellrc_colima_update
+  return 0
+}
+
 # Shared LAN IP helper (cached)
 _shellrc_lan_ip() {
   if [ -n "${_SHELLRC_LAN_IP_CACHE-}" ]; then
@@ -86,6 +162,8 @@ setopt PROMPT_SUBST
 setopt EXTENDED_GLOB
 
 typeset -g _PY_VERSION_CACHE _NODE_VERSION_CACHE _NPM_VERSION_CACHE
+autoload -Uz add-zsh-hook
+add-zsh-hook zshexit _shellrc_colima_cleanup
 
 _ip_mask() {
   local ip
@@ -138,6 +216,7 @@ __visible_len() {
 : ${PROMPT_MAX:=$(( COLUMNS - 2 ))}
 
 _build_prompt() {
+  local previous_status="${1:-$?}"
   emulate -L zsh
   setopt EXTENDED_GLOB
   local show_ip=1 show_npm=1 show_node=1 show_py=1 first len
@@ -149,7 +228,12 @@ _build_prompt() {
   local time_color="${prompt_colors[2]:-33}"
   local ip_color="${prompt_colors[3]:-196}"
 
-  local prefix="%F{250}┌%f%(?..%F{196}[✗]%f-)$(_venv_seg)[%F{${user_color}}%n%f]-[%F{${time_color}}%*%f]-"
+  _shellrc_colima_update
+  local error_segment=""
+  (( previous_status == 0 )) || error_segment='%F{196}[✗]%f-'
+  local colima_segment=""
+  [[ -z ${_SHELLRC_COLIMA_VISIBLE-} ]] || colima_segment="[%F{${_SHELLRC_COLIMA_COLOR}}${_SHELLRC_COLIMA_VISIBLE}%f]-"
+  local prefix="%F{250}┌%f${error_segment}$(_venv_seg)[%F{${user_color}}%n%f]-${colima_segment}[%F{${time_color}}%*%f]-"
   local suffix="[%F{70}%~%f]"
   local middle all
 
@@ -183,13 +267,15 @@ _build_prompt() {
 }
 
 precmd() {
+  local previous_status=$?
   unset _PY_VERSION_CACHE 2>/dev/null || true
   PROMPT_MAX=${PROMPT_MAX:-$(( COLUMNS - 2 ))}
-  _build_prompt
+  _build_prompt "$previous_status"
 }
 
 ZSH
 )"
+  _shellrc_colima_update --sync
   return 0
 fi
 
@@ -197,6 +283,20 @@ fi
 # bash prompt (original)
 # ---------------------------
 if [ -n "${BASH_VERSION-}" ]; then
+  # Append cleanup to an existing exit trap without discarding its command.
+  if [ "${_SHELLRC_COLIMA_TRAP_INSTALLED-}" != 1 ]; then
+    colima_exit_trap="$(trap -p EXIT)"
+    colima_exit_trap="${colima_exit_trap#trap -- }"
+    colima_exit_trap="${colima_exit_trap% EXIT}"
+    [ -z "$colima_exit_trap" ] || eval "colima_exit_trap=$colima_exit_trap"
+    trap "$colima_exit_trap
+_shellrc_colima_cleanup" EXIT
+    _SHELLRC_COLIMA_TRAP_INSTALLED=1
+  fi
+  case ";${PROMPT_COMMAND-};" in
+    *';_shellrc_colima_prompt_tick;'*) ;;
+    *) PROMPT_COMMAND="_shellrc_colima_prompt_tick${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+  esac
   prompt_colors="$(_shellrc_prompt_color_codes)"
   prompt_user_color="${prompt_colors%% *}"
   prompt_colors_rest="${prompt_colors#* }"
@@ -212,9 +312,10 @@ if [ -n "${BASH_VERSION-}" ]; then
   pythonYellow="\[\e[0;1;38;5;226m\]"; gitColor="\[\e[0;1;94m\]"
   firstLineChar=$white"\342\224\214"; secondLineChar="\342\224\224"; new_line="\n"; Xmark="\342\234\227"
 
-  xMark='$([[ $? != 0 ]] && echo "['$color_red$Xmark$white']-")'
+  xMark='$([[ ${_SHELLRC_PROMPT_EXIT_STATUS:-$?} != 0 ]] && echo "['$color_red$Xmark$white']-")'
   usrPrompt="[\[\e[0;5;38;5;197m\]\$"$white"]-"
   [ ${EUID} != 0 ] && username="["$usernameColor"\u"$white"]-"
+  colima='${_SHELLRC_COLIMA_VISIBLE+[}\[\e[38;5;${_SHELLRC_COLIMA_COLOR:-244}m\]${_SHELLRC_COLIMA_VISIBLE-}'$white'${_SHELLRC_COLIMA_VISIBLE+]-}'
   time="["$timeColor"\A"$white"]-"
   ip="[$ipColor$(_shellrc_lan_ip)$white]-"
   node='$(find -maxdepth 1 -type f -name "*.js*" 2>/dev/null | grep -q . && node -v | awk '"'"'{print"\033[0m['$nodeGreen'"$1"\033[0m]-"}'"'"')'$white
@@ -223,7 +324,8 @@ if [ -n "${BASH_VERSION-}" ]; then
   gitBranch='$(git branch 2>/dev/null | grep ^* | awk '"'"'{print"\033[0m['$gitColor'"$2"\033[0m]-"}'"'"')'$white
   workDir="["$lightGreen"\w"$white"]"
   virtualEnv='$([[ -n ${VIRTUAL_ENV-} ]] && echo -e "[${pythonYellow}${VIRTUAL_ENV##*/}${white}]-")'
-  firstLine=$firstLineChar$xMark$virtualEnv$username$time$ip$gitBranch$python$node$npm$workDir
+  firstLine=$firstLineChar$xMark$virtualEnv$username$colima$time$ip$gitBranch$python$node$npm$workDir
   secondLine=$new_line$white$secondLineChar$usrPrompt"\[\e[0;33m\]🐈"$white
   PS1=$firstLine$secondLine
+  _shellrc_colima_update --sync
 fi

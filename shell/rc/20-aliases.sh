@@ -10,3 +10,4 @@ alias bb='[[ "$DOTS_OS" == mac ]] && sudo shutdown -h now || shutdown 0'
 alias bbr='[[ "$DOTS_OS" == mac ]] && sudo shutdown -r now || shutdown -r 0'
 alias python=python3
 alias pip=pip3
+alias colima-fix='"$DOTS_ROOT/shell/colima-fix.sh"'

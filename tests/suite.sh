@@ -66,6 +66,13 @@ tests_suite_main() {
   run_test "lstype ranks lines" test_lstype_lines
   run_test "lstype ranks bytes" test_lstype_bytes
   run_test "lstype dir arg" test_lstype_dir_arg
+  run_test "colima-fix recovery and failure handling" test_colima_fix_recovery
+  run_test "colima-fix rejects unavailable storage and dependencies" test_colima_fix_preconditions
+  run_test "Colima initial health check completes during shell initialization" test_colima_prompt_initial_check
+  run_test "Colima prompt health states and placement" test_colima_prompt_states
+  run_test "Colima prompt cache and background worker" test_colima_prompt_cache
+  run_test "Colima worker is detached without disowning other jobs" test_colima_worker_detached
+  run_test "Colima prompt preserves hooks and exit status" test_colima_prompt_hooks
   run_test "prompt includes cat" test_prompt_contains_cat
   run_test "prompt colors derive from username hash" test_prompt_username_hash_colors
 
@@ -183,6 +190,7 @@ test_pyenv_skips_foreign_unwritable_root() {
 test_aliases_exist() {
   alias ls >/dev/null 2>&1 || return 1
   alias vi >/dev/null 2>&1 || return 1
+  alias colima-fix | command grep -F -- '"$DOTS_ROOT/shell/colima-fix.sh"' >/dev/null || return 1
   if [ "${DOTS_OS-}" = "mac" ]; then
     alias nmr >/dev/null 2>&1 || return 1
     alias nmr | command grep -F -- "dscacheutil -flushcache" >/dev/null || return 1
@@ -359,10 +367,11 @@ test_git_wrapper_defaults() {
 }
 
 test_git_branch_pr_and_clean() {
-  local checked_worktree expected fakebin not_repo output remote repo
+  local backup_checked_worktree checked_worktree expected fakebin not_repo output remote repo
   repo="$(make_tmp_dir)" || return 1
   remote="$repo/origin.git"
   fakebin="$repo/bin"
+  backup_checked_worktree="$repo/backup-checked-worktree"
   checked_worktree="$repo/checked-worktree"
   not_repo="$repo/not-a-repo"
   mkdir -p "$fakebin" "$not_repo" || { rm -rf "$repo"; return 1; }
@@ -412,7 +421,12 @@ EOF
     git branch still-remote
     git branch merged-checked-out
     git branch no-pr
-    git push origin open-pr merged-gone still-remote merged-checked-out -q
+    git branch backup/checked-out
+    git branch backup/local-only
+    git branch backup/still-remote
+    git branch other/keep
+    git push origin open-pr merged-gone still-remote merged-checked-out backup/still-remote -q
+    command git worktree add -q "$backup_checked_worktree" backup/checked-out
     command git worktree add -q "$checked_worktree" merged-checked-out
     command git --git-dir="$remote" update-ref -d refs/heads/merged-gone
     command git --git-dir="$remote" update-ref -d refs/heads/merged-checked-out
@@ -421,7 +435,7 @@ EOF
     hash -r 2>/dev/null || true
 
     output="$(git branch --pr)" || return 1
-    [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 6 ] || return 1
+    [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 10 ] || return 1
     expected="$(printf '  \033[35m#101\033[0m \033[1;32mopen-pr\033[0m \033[36mhttps://example.test/pr/101\033[0m')"
     printf '%s\n' "$output" | command grep -Fx -- "$expected" >/dev/null || return 1
     expected="$(printf '* \033[32mmain\033[0m')"
@@ -439,12 +453,25 @@ EOF
     printf '%s\n' "$output" | command grep -F -- "Cancelled." >/dev/null || return 1
     command git show-ref --verify --quiet refs/heads/merged-gone || return 1
 
-    output="$(printf 'yes\n' | git branch --clean 2>&1)" || return 1
+    output="$(printf 'yes\n' | git branch --clean 'backup/*' 2>&1)" || return 1
+    printf '%s\n' "$output" | command grep -F -- "#201" | command grep -F -- "merged-gone" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "backup/local-only" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "backup/still-remote" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "Skipping checked-out branch: backup/checked-out" >/dev/null || return 1
+    ! printf '%s\n' "$output" | command grep -Fq -- "other/keep" || return 1
+    printf '%s\n' "$output" | command grep -F -- "Force-delete 3 local branches?" >/dev/null || return 1
     printf '%s\n' "$output" | command grep -F -- "Deleted branch merged-gone" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "Deleted branch backup/local-only" >/dev/null || return 1
+    printf '%s\n' "$output" | command grep -F -- "Deleted branch backup/still-remote" >/dev/null || return 1
     ! command git show-ref --verify --quiet refs/heads/merged-gone || return 1
+    ! command git show-ref --verify --quiet refs/heads/backup/local-only || return 1
+    ! command git show-ref --verify --quiet refs/heads/backup/still-remote || return 1
+    command git --git-dir="$remote" show-ref --verify --quiet refs/heads/backup/still-remote || return 1
     command git show-ref --verify --quiet refs/heads/still-remote || return 1
     command git show-ref --verify --quiet refs/heads/merged-checked-out || return 1
     command git show-ref --verify --quiet refs/heads/no-pr || return 1
+    command git show-ref --verify --quiet refs/heads/backup/checked-out || return 1
+    command git show-ref --verify --quiet refs/heads/other/keep || return 1
 
     cd "$not_repo" || return 1
     if output="$(git branch --pr 2>&1)"; then
@@ -1303,6 +1330,328 @@ test_lstype_dir_arg() {
   [ "$top_count" = "3" ] || { rm -rf "$base"; return 1; }
   rm -rf "$base"
 }
+
+tests__colima_fixture() {
+  mkdir -p "$1/bin" "$1/storage/default" || return 1
+  : >"$1/storage/default/colima.yaml"
+  : >"$1/calls"
+  cat >"$1/bin/colima" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$SHELLRC_COLIMA_TEST_LOG"
+case "$*" in
+  '--profile default stop')
+    [ "${SHELLRC_COLIMA_TEST_INTERRUPT:-0}" = 0 ] || kill -INT "$PPID"
+    exit "${SHELLRC_COLIMA_TEST_STOP:-0}" ;;
+  '--profile default stop --force')
+    [ "${SHELLRC_COLIMA_TEST_DISCONNECT:-0}" = 0 ] || rm "$COLIMA_HOME/default/colima.yaml"
+    exit "${SHELLRC_COLIMA_TEST_FORCE:-0}" ;;
+  '--profile default start') exit "${SHELLRC_COLIMA_TEST_START:-0}" ;;
+  *) exit 99 ;;
+esac
+EOF
+  cat >"$1/bin/curl" <<'EOF'
+#!/bin/sh
+printf 'curl %s\n' "$*" >>"$SHELLRC_COLIMA_TEST_LOG"
+[ "${SHELLRC_COLIMA_TEST_DELAY:-0}" = 0 ] || sleep "$SHELLRC_COLIMA_TEST_DELAY"
+printf '%s' "${SHELLRC_COLIMA_TEST_BODY-OK}"
+exit "${SHELLRC_COLIMA_TEST_CURL:-0}"
+EOF
+  chmod +x "$1/bin/colima" "$1/bin/curl"
+  ln -s "$(command -v mv)" "$1/bin/mv"
+}
+
+test_colima_fix_recovery() (
+  local tmp output rc expected
+  tmp="$(make_tmp_dir)" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" COLIMA_PROFILE=other
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls"
+  if [ -n "${ZSH_VERSION-}" ]; then
+    setopt local_options aliases
+    unsetopt posixaliases
+  fi
+  output="$(eval 'colima-fix')" || return 1
+  case "$output" in *'Docker is responding'*) :;; *) return 1;; esac
+  expected="$(printf '%s\n' '--profile default stop' '--profile default stop --force' '--profile default start')"
+  [ "$(sed -n '1,3p' "$tmp/calls")" = "$expected" ] || return 1
+  command grep -F -- "--unix-socket $COLIMA_HOME/default/docker.sock http://localhost/_ping" "$tmp/calls" >/dev/null || return 1
+  command grep -F -- '--fail --max-time 1' "$tmp/calls" >/dev/null || return 1
+
+  : >"$tmp/calls"
+  export SHELLRC_COLIMA_TEST_STOP=3 SHELLRC_COLIMA_TEST_FORCE=4
+  output="$("$DOTS_ROOT/shell/colima-fix.sh" 2>&1)" || return 1
+  [ "$(sed -n '1,3p' "$tmp/calls")" = "$expected" ] || return 1
+  case "$output" in *'force-stop failed; continuing recovery'*) :;; *) return 1;; esac
+
+  : >"$tmp/calls"
+  export SHELLRC_COLIMA_TEST_START=7
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 7 ] || return 1
+  ! command grep -q '^curl ' "$tmp/calls" || return 1
+  unset SHELLRC_COLIMA_TEST_START
+
+  export SHELLRC_COLIMA_TEST_CURL=28
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  command grep -F 'Docker health check failed' "$tmp/output" >/dev/null || return 1
+  unset SHELLRC_COLIMA_TEST_CURL
+  export SHELLRC_COLIMA_TEST_BODY=unexpected
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+
+  : >"$tmp/calls"
+  export SHELLRC_COLIMA_TEST_INTERRUPT=1
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 130 ] || return 1
+  [ "$(cat "$tmp/calls")" = '--profile default stop' ] || return 1
+)
+
+test_colima_fix_preconditions() (
+  local tmp rc
+  tmp="$(make_tmp_dir)" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/missing storage"
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls"
+  "$DOTS_ROOT/shell/colima-fix.sh" --help >"$tmp/output" || return 1
+  command grep -F 'Usage: colima-fix' "$tmp/output" >/dev/null || return 1
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" --help extra >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || return 1
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] && [ ! -e "$COLIMA_HOME" ] && [ ! -s "$tmp/calls" ] || return 1
+  command grep -F 'storage/configuration unavailable' "$tmp/output" >/dev/null || return 1
+  export COLIMA_HOME="$tmp/storage" SHELLRC_COLIMA_TEST_DISCONNECT=1
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  ! command grep -F -- '--profile default start' "$tmp/calls" || return 1
+  : >"$tmp/calls"
+  : >"$tmp/storage/default/colima.yaml"
+  unset SHELLRC_COLIMA_TEST_DISCONNECT
+
+  # Invoke Bash directly with an isolated PATH so installed tools cannot mask missing dependencies.
+  local bash_bin
+  bash_bin="$(command -v bash)"
+  export PATH="$tmp/bin" COLIMA_HOME="$tmp/storage"
+  /bin/rm "$tmp/bin/curl"
+  rc=0
+  "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
+  /usr/bin/grep -F 'required command not found: curl' "$tmp/output" >/dev/null || return 1
+  /bin/rm "$tmp/bin/colima"
+  rc=0
+  "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 127 ] || return 1
+  /usr/bin/grep -F 'required command not found: colima' "$tmp/output" >/dev/null || return 1
+  export PATH=/usr/bin:/bin
+)
+
+tests__colima_wait() {
+  local attempt=0
+  while kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 100 ] || return 1
+    sleep 0.02
+  done
+}
+
+test_colima_prompt_initial_check() (
+  local tmp
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" COLIMA_PROFILE=other
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=0.2
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
+  command grep -F -- '--fail --max-time 1' "$tmp/calls" >/dev/null || return 1
+  # A fresh first prompt reuses the completed result without another check.
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
+
+  _shellrc_colima_cleanup
+  export SHELLRC_COLIMA_TEST_CURL=28
+  . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 196 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
+)
+
+test_colima_prompt_states() (
+  local tmp prompt
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" COLIMA_PROFILE=other
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls"
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
+  [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
+  command grep -F -- "$COLIMA_HOME/default/docker.sock" "$tmp/calls" >/dev/null || return 1
+  if [ -n "${ZSH_VERSION-}" ]; then
+    _build_prompt 0
+    case "$PROMPT" in *'%n%f]-[%F{46}●%f]-['*) :;; *) return 1;; esac
+  else
+    case "$PS1" in *'\u\[\e[0;37m\]]-${_SHELLRC_COLIMA_VISIBLE+[}\[\e[38;5;${_SHELLRC_COLIMA_COLOR:-244}m\]${_SHELLRC_COLIMA_VISIBLE-}\[\e[0;37m\]${_SHELLRC_COLIMA_VISIBLE+]-}['*) :;; *) return 1;; esac
+  fi
+  export SHELLRC_COLIMA_TEST_CURL=28
+  _SHELLRC_COLIMA_LAST=-5
+  _shellrc_colima_update
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" = 196 ] || return 1
+  unset SHELLRC_COLIMA_TEST_CURL
+  export SHELLRC_COLIMA_TEST_BODY=invalid
+  _SHELLRC_COLIMA_LAST=-5
+  _shellrc_colima_update
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" = 196 ] || return 1
+
+  # A missing curl is unknown rather than a claim about Docker health.
+  local original_path="$PATH"
+  /bin/rm "$tmp/bin/curl"
+  PATH="$tmp/bin"
+  _SHELLRC_COLIMA_LAST=-5
+  _shellrc_colima_update
+  PATH="$original_path"
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
+)
+
+tests__colima_segment_hidden() {
+  local segment
+  if [ -n "${ZSH_VERSION-}" ]; then
+    _build_prompt 0
+    case "$PROMPT" in *'%n%f]-['*) :;; *) return 1;; esac
+    case "$PROMPT" in *'?%f]'*|*'[]'*|*']--['*) return 1;; esac
+  else
+    segment="$(eval "printf '%s' \"$colima\"")"
+    case "$segment" in *'?'*|*'[]'*|*']-'*|*'●'*) return 1;; esac
+  fi
+}
+
+test_colima_prompt_cache() (
+  local tmp first_pid first_cache
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage"
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=1
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  if [ -n "${ZSH_VERSION-}" ]; then
+    _build_prompt 0
+  else
+    _shellrc_colima_prompt_tick
+  fi
+  first_pid="$_SHELLRC_COLIMA_PID"
+  first_cache="$_SHELLRC_COLIMA_CACHE"
+  [ ! -f "$first_cache/result.$_SHELLRC_COLIMA_GENERATION" ] || return 1
+  kill -0 "$first_pid" 2>/dev/null || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_PID" = "$first_pid" ] || return 1
+  [ ! -f "$first_cache/result.$_SHELLRC_COLIMA_GENERATION" ] || return 1
+  # Changing storage while a worker is running must discard its eventual result.
+  COLIMA_HOME="$tmp/other storage"
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_PID" = "$first_pid" ] && [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
+  _shellrc_colima_update
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
+  printf '%s healthy\n' "$((SECONDS - 5))" >"$first_cache/result.$_SHELLRC_COLIMA_GENERATION"
+  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
+  tests__colima_wait || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 3 ] || return 1
+  _shellrc_colima_cleanup
+  [ ! -d "$first_cache" ] || return 1
+)
+
+test_colima_worker_detached() (
+  local tmp other_pid
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; [ -z "${other_pid-}" ] || kill "$other_pid" 2>/dev/null; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage"
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=0.5
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  sleep 5 >/dev/null 2>&1 &
+  other_pid=$!
+  _shellrc_colima_update
+  kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null || return 1
+  jobs -l >"$tmp/jobs"
+  ! command grep -F -- "$_SHELLRC_COLIMA_PID" "$tmp/jobs" >/dev/null || return 1
+  command grep -F -- "$other_pid" "$tmp/jobs" >/dev/null || return 1
+  tests__colima_wait || return 1
+  _shellrc_colima_update
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] || return 1
+)
+
+test_colima_prompt_hooks() (
+  local tmp
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" SHELLRC_COLIMA_TEST_LOG="$tmp/calls"
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  if [ -n "${ZSH_VERSION-}" ]; then
+    _build_prompt 1
+    case "$PROMPT" in *'[✗]'*) :;; *) return 1;; esac
+    _build_prompt 0
+    case "$PROMPT" in *'[✗]'*) return 1;; esac
+    case " ${zshexit_functions[*]} " in *' _shellrc_colima_cleanup '*) :;; *) return 1;; esac
+    case " ${precmd_functions[*]} " in *' _shellrc_restore_keys '*) :;; *) return 1;; esac
+  else
+    case "$PROMPT_COMMAND" in '_shellrc_colima_prompt_tick;'*'_shellrc_auto_env'*) :;; *) return 1;; esac
+    false
+    _shellrc_colima_prompt_tick
+    [ "$_SHELLRC_PROMPT_EXIT_STATUS" -eq 1 ] || return 1
+    _shellrc_colima_prompt_tick
+    [ "$_SHELLRC_PROMPT_EXIT_STATUS" -eq 0 ] || return 1
+  fi
+  tests__colima_wait || return 1
+  # Re-sourcing must preserve an existing exit trap and avoid duplicate prompt hooks.
+  bash --noprofile --norc -ic '
+    trap '\''printf "%s\n" "$?" >"$2/prior-exit"'\'' EXIT
+    PROMPT_COMMAND="printf original >/dev/null"
+    . "$1/shell/rc/50-prompt.sh"
+    . "$1/shell/rc/50-prompt.sh"
+    case "$PROMPT_COMMAND" in _shellrc_colima_prompt_tick\;printf*) :;; *) exit 1;; esac
+    _shellrc_colima_update
+    printf "%s\n" "$_SHELLRC_COLIMA_CACHE" >"$2/cache-path"
+    exit 3
+  ' bash "$DOTS_ROOT" "$tmp" >"$tmp/child-output" 2>&1 && return 1
+  [ "$(cat "$tmp/prior-exit")" = 3 ] || return 1
+  [ ! -d "$(cat "$tmp/cache-path")" ] || return 1
+)
 
 test_prompt_contains_cat() {
   if [ -n "${BASH_VERSION-}" ]; then

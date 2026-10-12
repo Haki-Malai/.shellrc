@@ -54,6 +54,22 @@
 - Manual verification:
   - Source `shell/rc/init.sh` as a different user with inherited `PYENV_ROOT` pointing at the previous user's pyenv and confirm there is no `pyenv: cannot rehash` error.
 
+### Colima Docker health icon
+- Expected behavior:
+  - Bash and Zsh display an icon in its own bracketed segment immediately after the username.
+  - Green `●` means Docker answered `GET /_ping` successfully with body `OK`. Red `●` means unavailable (including missing storage/socket, failed HTTP response, or timeout). Unknown/stale results or missing checking dependencies hide the entire status segment, including its brackets and separator.
+  - Always checks the `default` profile at `${COLIMA_HOME:-$HOME/.colima}/default/docker.sock`, ignoring `COLIMA_PROFILE` and the current Docker context.
+  - Shell initialization waits for the first curl health check, with a one-second timeout, so the first prompt has a completed result. Probe failures allow startup to continue with a red icon; missing curl hides the status segment.
+  - Later prompt activity triggers a background curl check at most once every five seconds with the same timeout. Results appear on the next prompt; no timer refreshes an idle shell.
+  - External storage is accessed only by the health-check worker, synchronously during initialization and in the background afterward. Only one worker runs per shell; changing `COLIMA_HOME` invalidates the old result.
+- Output pattern:
+  - Prompt contains `[<username>]-[<icon>]-[<time>]` for known results and `[<username>]-[<time>]` for unknown/stale results; worker output and job notifications are suppressed.
+  - Existing prompt colors, hooks, command-failure marker, and cat icon remain available.
+- Side effects:
+  - Maintains atomic results in a private directory under local `/tmp`, removed at shell exit.
+- Manual verification:
+  - Open Bash/Zsh and confirm the first prompt shows the appropriate icon. Check an inaccessible `COLIMA_HOME` and confirm startup continues with a red icon. Verify subsequent refreshes stay in the background and hide the entire status segment when the result becomes stale. With job monitoring enabled and another background job running, verify no worker launch/completion notices appear and the other job remains registered.
+
 ## 4) User-Facing Function Contracts
 
 ### `clip`
@@ -171,7 +187,7 @@
   - `git cdx apply` rejects missing/extra arguments, worktree IDs containing characters outside `[A-Za-z0-9_-]`, non-git current directories, and missing or non-git Codex worktree project directories.
   - `git cdx list [-v|--verbose]` lists only worktrees belonging to the current repository that have staged, unstaged, or untracked changes; clean worktrees are omitted.
   - `git branch --pr` lists every local branch, preserving `*` for the current branch and `+` for branches checked out in other worktrees, and annotates branches whose head names match same-repository open pull requests.
-  - `git branch --clean` finds same-repository merged pull requests whose head names match local branches, verifies the corresponding branch is absent from the live `origin` remote, skips branches checked out in any worktree, and asks for confirmation before force-deleting the eligible local branches.
+  - `git branch --clean [<pattern>]` finds same-repository merged pull requests whose head names match local branches and verifies the corresponding branch is absent from the live `origin` remote. When an optional Git ref glob is provided, local branches matching it are also eligible even when they still exist on `origin`. It skips all eligible branches checked out in any worktree and asks for confirmation before force-deleting the rest.
   - `git lc` counts added and removed lines in the current staged changes; when there are no staged changes, it counts all uncommitted tracked changes plus untracked text file lines. `git lc -v [branch]` also prints current per-file counts, branch diff counts against `origin/main` by default (or `origin/<branch>`/`<branch>` when provided), and a branch-plus-current total.
   - `git yolo` finds the newest author/committer identity in local commit history whose name contains `malai`, runs `git add .` only when there are no staged changes, amends with that identity when found, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease`.
   - After successful `git commit` commands, print the resulting `HEAD` author account.
@@ -185,7 +201,7 @@
   - `git ri` mirrors upstream output for fetch, checkout, fast-forward merge, and interactive rebase commands against the selected base branch.
   - `git cdx list` prints each dirty worktree as a colored `<path>  <short-head> [<branch>]` or `<path>  <short-head> (detached HEAD)` header, followed by colored file-extension counts sorted by count and a total change count.
   - `git cdx list -v` and `git cdx list --verbose` replace the extension summary with colored `git status --short` rows.
-  - In `git branch --pr`, ordinary branches use standard-style `<marker> <branch>` rows while open-PR branches use colored `<marker> #<pr-number> <branch> <pr-url>` rows. The candidate list from `git branch --clean` prints colored `#<pr-number> <branch> <pr-url>` rows and prompts `Force-delete <N> local branch(es)? [y/N]` before deletion.
+  - In `git branch --pr`, ordinary branches use standard-style `<marker> <branch>` rows while open-PR branches use colored `<marker> #<pr-number> <branch> <pr-url>` rows. The candidate list from `git branch --clean` prints colored `#<pr-number> <branch> <pr-url>` rows for PR branches, plain branch-name rows for additional pattern matches, and prompts `Force-delete <N> local branch(es)? [y/N]` before deletion.
   - On successful commit, prints `Commiter identity: <name> <email>` using the resulting `HEAD` author, with `<name>` colored using the same 256-color code as the prompt username.
 - Exit behavior:
   - Mirrors upstream `git` for the delegated command.
@@ -199,7 +215,7 @@
   - `git stash` default behavior includes untracked files in created stashes.
   - `git cdx apply <worktree-id>` writes `/tmp/<worktree-id>.patch` and may change the current working tree through `git apply --3way`.
   - `git cdx list` has no intended side effects.
-  - `git branch --pr` has no intended side effects. After explicit confirmation, `git branch --clean` force-deletes only the displayed eligible local branches; it does not delete remote branches and does not delete a branch checked out in any worktree.
+  - `git branch --pr` has no intended side effects. After explicit confirmation, `git branch --clean` force-deletes only the displayed eligible local branches; pattern-matched branches may still have a corresponding branch on `origin`. It does not delete remote branches and does not delete a branch checked out in any worktree.
   - `git lc` has no intended side effects.
   - `git yolo` stages all working tree changes under the current directory only when there are no staged changes; when staged changes already exist, it amends only those staged changes and leaves other working tree changes unstaged. It may set the amended commit author/committer from local `malai` history, amends the current commit without editing the message, and when `-f` or `--force` is passed amends with `--no-verify` before pushing with `--no-verify --force-with-lease` to the configured upstream.
 - Manual verification:
@@ -210,7 +226,7 @@
   - In a git repo with tracked + untracked changes, run `git stash -m "check"` and confirm untracked files are removed from working tree and present in `git stash show --name-only --include-untracked stash@{0}`.
   - From outside a git repo, run `git cdx apply c5de` and confirm it is refused. From a project repo with `$HOME/.codex/worktrees/c5de/<project-name>` containing a compatible diff and an untracked file, run `git cdx apply c5de` and confirm `/tmp/c5de.patch` is written and the patch is applied with `--3way`, including the untracked file.
   - In a repo with clean and dirty linked worktrees, run `git cdx list` from any linked worktree and confirm only dirty worktrees appear with colored extension summaries; run `git cdx list -v` and confirm the summaries are replaced by colored short status rows.
-  - In a repository with local branches for open and merged same-repository PRs, run `git branch --pr` and confirm every local branch appears, with matching open PRs rendered as colored PR rows and current/linked-worktree markers preserved. Delete one merged PR's remote head, run `git branch --clean`, decline once and confirm no branch is deleted, then confirm and verify only that local branch is deleted; verify merged branches still on `origin` and branches checked out in linked worktrees remain.
+  - In a repository with local branches for open and merged same-repository PRs, run `git branch --pr` and confirm every local branch appears, with matching open PRs rendered as colored PR rows and current/linked-worktree markers preserved. Delete one merged PR's remote head, run `git branch --clean`, decline once and confirm no branch is deleted, then confirm and verify only that local branch is deleted; verify merged branches still on `origin` and branches checked out in linked worktrees remain. Create local `backup/local-only`, `backup/still-remote`, and `other/keep` branches, push `backup/still-remote`, then run `git branch --clean 'backup/*'`; verify the two `backup/*` branches and normal eligible PR branches are offered together, confirmation deletes their local refs, `other/keep` remains, and the remote `backup/still-remote` ref remains.
   - In a git repo with a branch ahead of `origin/main`, unstaged tracked changes, and an untracked text file, run `git lc` and `git lc -v` and confirm current, branch, and branch-plus-current totals; then stage the tracked file, run `git lc` and `git lc -v`, and confirm only staged changes are included in the current and branch-plus-current totals. Run `git lc -v dev` and confirm the branch section uses `origin/dev` when it exists.
   - In a disposable git repo with a temporary local bare remote, change a tracked file, run `git yolo`, and confirm only the local branch points to the amended commit; stage one tracked file while leaving another tracked file unstaged, run `git yolo`, and confirm only the staged file is amended; then install failing pre-commit and pre-push hooks, run `git yolo -f`, and confirm the local and remote branch point to the amended commit.
   - In a disposable git repo with a stale remote-tracking branch, run `git push -f` and `git push --force` and confirm they do not overwrite the remote branch; then refresh the remote-tracking branch, install a failing pre-push hook, run `git push -f`, and confirm the push succeeds.
@@ -293,10 +309,30 @@
 | `bbr` | Restart shortcut (`sudo shutdown -r now` on macOS, `shutdown -r 0` otherwise). | No stable output guaranteed. | Mirrors underlying shutdown command. | Host restart. | `alias bbr` (do not execute casually) |
 | `python` | Maps to `python3`. | Mirrors `python3`. | Mirrors `python3`. | None. | `alias python`; `python --version` |
 | `pip` | Maps to `pip3`. | Mirrors `pip3`. | Mirrors `pip3`. | Package management side effects depend on command. | `alias pip`; `pip --version` |
+| `colima-fix` | Runs `shell/colima-fix.sh` for the default profile. | Progress and Colima diagnostics; see script contract. | Mirrors recovery result. | Stops and starts the default Colima VM. | `colima-fix --help`; exercise recovery with stub tools. |
 | `nmr` | On Linux, restart NetworkManager. On macOS, flush DNS caches, restart `mDNSResponder`, and set `Wi-Fi` DNS servers to `1.1.1.1` and `8.8.8.8`. | No stable output guaranteed. | Mirrors underlying commands. | Network interruption/restart; on macOS also updates Wi-Fi DNS servers. | `alias nmr` |
 | `webunblocker` (Linux) | Remove `/etc/hosts`, then run `nmr`. | No stable output guaranteed. | Mirrors underlying commands. | Deletes `/etc/hosts`, restarts network. | `alias webunblocker` |
 
 ## 6) Repo Script Contracts
+
+### `shell/colima-fix.sh`
+- Expected behavior:
+  - Accepts no arguments or `--help`; rejects other arguments.
+  - Requires `colima`, `curl`, and readable `${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml`; checks storage again before startup and refuses unavailable storage/configuration without creating directories.
+  - Runs `colima --profile default stop`, `colima --profile default stop --force`, then `colima --profile default start`. Both stop failures are reported but do not prevent later recovery steps.
+  - Ignores `COLIMA_PROFILE`. Preserves upstream diagnostics; after startup, requires a successful Docker `GET /_ping` response with body `OK`, using the profile socket and a one-second timeout.
+  - Ctrl+C cancels remaining recovery steps. Does not delete data, edit configuration, or repair disks.
+- Output pattern:
+  - Help begins `Usage: colima-fix [--help]`.
+  - Progress begins `colima-fix:`; successful recovery contains `default profile recovered; Docker is responding`.
+  - Failures identify unsupported arguments, missing commands, unavailable configuration/storage, stop failures, or failed Docker health check.
+- Exit behavior:
+  - `0` for help or verified recovery; `2` for unsupported arguments; `127` for missing dependencies.
+  - Returns the startup command's failure status, or `1` for unavailable storage/unhealthy Docker. Cancellation returns `130` (INT) or `143` (TERM).
+- Side effects:
+  - Stops and restarts the default VM, interrupting its running workloads. Colima performs its normal startup/stop operations using the existing configuration.
+- Manual verification:
+  - `shell/colima-fix.sh --help`; with temporary `colima`/`curl` stubs, verify order, continuing after stop failures, and refusing startup/health failures.
 
 ### `tests/run.sh`
 - Expected behavior:
@@ -353,6 +389,7 @@ The following are implementation helpers, not direct user contracts:
 - `_shellrc_source_env_file`, `_shellrc_auto_env`
 - `_shellrc_current_user`, `_shellrc_user_home`, `_shellrc_path_home_user`, `_shellrc_home_for_current_user`, `_shellrc_cd_home_if_foreign_pwd`, `_shellrc_pyenv_root_is_safe`
 - `_shellrc_lan_ip`, `_shellrc_prompt_username`, `_shellrc_prompt_user_hex`, `_shellrc_prompt_color_codes`, `_ip_mask`, `_git_branch`, `_venv_seg`, `_git_seg`, `_py_seg`, `_node_seg`, `_npm_seg`, `_ip_seg`, `__visible_len`, `_build_prompt`, `precmd`
+- `_shellrc_colima_cleanup`, `_shellrc_colima_worker`, `_shellrc_colima_update`, `_shellrc_colima_prompt_tick`
 - `_shellrc_restore_keys`, `_load_glob`, `_load_funcs`
 
 Agents should not assert stable output contracts for these helpers unless they are intentionally promoted to user-facing commands.
@@ -368,6 +405,7 @@ Contracts in this document are grounded in:
 - `shell/functions/lscatclip.sh`
 - `shell/functions/lstype.sh`
 - `shell/functions/gdc.sh`
+- `shell/colima-fix.sh`
 - `shell/rc/01-user-context.sh`
 - `shell/rc/05-pyenv.sh`
 - `shell/rc/12-safety-keys.sh`

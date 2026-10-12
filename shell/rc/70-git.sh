@@ -330,7 +330,8 @@ _git_branch_rows_include() {
 }
 
 _git_branch_clean() {
-  local branch candidate_count candidate_rows number remote_heads reply row rows tab url
+  local branch candidate_count candidate_rows number pattern pattern_branches remote_heads reply row rows tab url
+  pattern="${1-}"
   _git_branch_pr_context || return $?
   if ! command git remote get-url origin >/dev/null 2>&1; then
     printf 'git branch --clean: origin remote not found\n' >&2
@@ -364,14 +365,44 @@ ${row}"
 $rows
 EOF
 
+  if [ -n "$pattern" ]; then
+    pattern_branches="$(command git for-each-ref --format='%(refname:short)' -- "refs/heads/$pattern")" || return $?
+    while IFS= read -r branch; do
+      [ -n "$branch" ] || continue
+      _git_branch_rows_include "$candidate_rows" "$branch" && continue
+      if _git_branch_is_checked_out "$branch"; then
+        printf '\033[33mSkipping checked-out branch: %s\033[0m\n' "$branch" >&2
+        continue
+      fi
+      row="$(printf '%s\t%s\t%s' "-" "$branch" "-")"
+      if [ -n "$candidate_rows" ]; then
+        candidate_rows="${candidate_rows}
+${row}"
+      else
+        candidate_rows="$row"
+      fi
+      candidate_count=$((candidate_count + 1))
+    done <<EOF
+$pattern_branches
+EOF
+  fi
+
   if [ "$candidate_count" -eq 0 ]; then
-    printf '\033[2mNo merged local PR branches with deleted origin branches.\033[0m\n'
+    if [ -n "$pattern" ]; then
+      printf '\033[2mNo eligible local branches.\033[0m\n'
+    else
+      printf '\033[2mNo merged local PR branches with deleted origin branches.\033[0m\n'
+    fi
     return 0
   fi
 
   printf 'Local branches eligible for deletion:\n'
   while IFS="$tab" read -r number branch url; do
-    _git_branch_print_pr "$number" "$branch" "$url"
+    if [ "$number" = "-" ]; then
+      printf '  %s\n' "$branch"
+    else
+      _git_branch_print_pr "$number" "$branch" "$url"
+    fi
   done <<EOF
 $candidate_rows
 EOF
@@ -658,6 +689,10 @@ git() {
         ;;
       2:--clean)
         _git_branch_clean
+        return $?
+        ;;
+      3:--clean)
+        _git_branch_clean "$3"
         return $?
         ;;
     esac
