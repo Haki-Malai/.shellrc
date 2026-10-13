@@ -56,19 +56,19 @@
 
 ### Colima Docker health icon
 - Expected behavior:
-  - Bash and Zsh display an icon in its own bracketed segment immediately after the username.
-  - Green `●` means Docker answered `GET /_ping` successfully with body `OK`. Red `●` means unavailable (including missing storage/socket, failed HTTP response, or timeout). Unknown/stale results or missing checking dependencies hide the entire status segment, including its brackets and separator.
+  - Bash and Zsh display an icon in its own bracketed segment immediately after the username, only on the first prompt after initialization. All later prompts hide the entire status segment, including its brackets and separator, regardless of health.
+  - Green `●` means Docker answered `GET /_ping` successfully with body `OK`. Red `●` means unavailable (including missing storage/socket, failed HTTP response, or timeout). The first prompt always shows the result, including gray `?` if the check cannot run.
   - Always checks the `default` profile at `${COLIMA_HOME:-$HOME/.colima}/default/docker.sock`, ignoring `COLIMA_PROFILE` and the current Docker context.
-  - Shell initialization waits for the first curl health check, with a one-second timeout, so the first prompt has a completed result. Probe failures allow startup to continue with a red icon; missing curl hides the status segment.
-  - Later prompt activity triggers a background curl check at most once every five seconds with the same timeout. Results appear on the next prompt; no timer refreshes an idle shell.
-  - External storage is accessed only by the health-check worker, synchronously during initialization and in the background afterward. Only one worker runs per shell; changing `COLIMA_HOME` invalidates the old result.
+  - Shell initialization waits for the first curl health check, with a one-second timeout. If the result expires or storage changes during the rest of startup, the first prompt waits for a fresh check with the same timeout. Probe failures allow startup to continue with a red icon; missing curl shows gray `?` on the first prompt.
+  - Later prompt activity does not trigger further health checks. Re-sourcing the prompt module starts a new first-prompt display.
+  - External storage is accessed only by the health-check worker during initialization or a first-prompt refresh. Changing `COLIMA_HOME` before the first prompt invalidates the old result.
 - Output pattern:
-  - Prompt contains `[<username>]-[<icon>]-[<time>]` for known results and `[<username>]-[<time>]` for unknown/stale results; worker output and job notifications are suppressed.
+  - Prompt contains `[<username>]-[<icon>]-[<time>]` on the first prompt and `[<username>]-[<time>]` on all later prompts; worker output is suppressed.
   - Existing prompt colors, hooks, command-failure marker, and cat icon remain available.
 - Side effects:
   - Maintains atomic results in a private directory under local `/tmp`, removed at shell exit.
 - Manual verification:
-  - Open Bash/Zsh and confirm the first prompt shows the appropriate icon. Check an inaccessible `COLIMA_HOME` and confirm startup continues with a red icon. Verify subsequent refreshes stay in the background and hide the entire status segment when the result becomes stale. With job monitoring enabled and another background job running, verify no worker launch/completion notices appear and the other job remains registered.
+  - Open Bash/Zsh and confirm the first prompt shows the appropriate icon, even when remaining startup takes over five seconds. Check an inaccessible `COLIMA_HOME` and confirm startup continues with a red icon. Verify green, red, and gray `?` boxes disappear on the second prompt and remain hidden after five seconds, with no further health probes. Re-source the prompt module and verify the box appears once again.
 
 ## 4) User-Facing Function Contracts
 

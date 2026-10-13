@@ -1,6 +1,6 @@
 # shell/rc/50-prompt.sh
 
-# The initial check waits for Docker; later prompt checks run in the background.
+# The initial check waits for Docker; only the first prompt displays its result.
 _shellrc_colima_cleanup() {
   if [ -n "${_SHELLRC_COLIMA_PID-}" ]; then
     kill "$_SHELLRC_COLIMA_PID" 2>/dev/null || true
@@ -22,6 +22,17 @@ _shellrc_colima_worker() {
 
 _shellrc_colima_update() {
   [ -z "${ZSH_VERSION-}" ] || setopt local_options no_monitor no_notify
+  if [ "${1-}" = --prompt ]; then
+    if [ "${_SHELLRC_COLIMA_FIRST_PROMPT-}" = 1 ]; then
+      unset _SHELLRC_COLIMA_FIRST_PROMPT
+      _shellrc_colima_update --sync
+      # The first prompt must report unknown checks too.
+      _SHELLRC_COLIMA_VISIBLE="$_SHELLRC_COLIMA_ICON"
+    else
+      unset _SHELLRC_COLIMA_VISIBLE
+    fi
+    return 0
+  fi
   local storage="${COLIMA_HOME:-$HOME/.colima}" checked state
   _SHELLRC_COLIMA_COLOR=244
   _SHELLRC_COLIMA_ICON='?'
@@ -72,7 +83,7 @@ _shellrc_colima_update() {
 
 _shellrc_colima_prompt_tick() {
   _SHELLRC_PROMPT_EXIT_STATUS=$?
-  _shellrc_colima_update
+  _shellrc_colima_update --prompt
   return 0
 }
 
@@ -228,7 +239,7 @@ _build_prompt() {
   local time_color="${prompt_colors[2]:-33}"
   local ip_color="${prompt_colors[3]:-196}"
 
-  _shellrc_colima_update
+  _shellrc_colima_update --prompt
   local error_segment=""
   (( previous_status == 0 )) || error_segment='%F{196}[✗]%f-'
   local colima_segment=""
@@ -276,6 +287,7 @@ precmd() {
 ZSH
 )"
   _shellrc_colima_update --sync
+  _SHELLRC_COLIMA_FIRST_PROMPT=1
   return 0
 fi
 
@@ -328,4 +340,5 @@ _shellrc_colima_cleanup" EXIT
   secondLine=$new_line$white$secondLineChar$usrPrompt"\[\e[0;33m\]🐈"$white
   PS1=$firstLine$secondLine
   _shellrc_colima_update --sync
+  _SHELLRC_COLIMA_FIRST_PROMPT=1
 fi

@@ -1480,11 +1480,51 @@ test_colima_prompt_initial_check() (
   [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] || return 1
   [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
 
+  # Startup after this module may take longer than the cache lifetime.
+  printf '%s healthy\n' "$((SECONDS - 5))" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
+  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
+  [ -z "${_SHELLRC_COLIMA_FIRST_PROMPT-}" ] || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
+  _shellrc_colima_update --prompt
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
+  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
+  _shellrc_colima_update --prompt
+  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
+
   _shellrc_colima_cleanup
   export SHELLRC_COLIMA_TEST_CURL=28
   . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
   [ "$_SHELLRC_COLIMA_COLOR" -eq 196 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
   [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
+  printf '%s unavailable\n' "$((SECONDS - 5))" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
+  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
+  [ "$_SHELLRC_COLIMA_COLOR" -eq 196 ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
+  if [ -n "${ZSH_VERSION-}" ]; then
+    case "$PROMPT" in *'%n%f]-[%F{196}●%f]-['*) :;; *) return 1;; esac
+  fi
+  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 4 ] || return 1
+  _shellrc_colima_update --prompt
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
+
+  # A completed unknown check is visible only on the first prompt.
+  printf '%s unknown\n' "$SECONDS" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+  _SHELLRC_COLIMA_FIRST_PROMPT=1
+  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '?' ] || return 1
+  if [ -n "${ZSH_VERSION-}" ]; then
+    case "$PROMPT" in *'%n%f]-[%F{244}?%f]-['*) :;; *) return 1;; esac
+  else
+    case "$(eval "printf '%s' \"$colima\"")" in *'?'*) :;; *) return 1;; esac
+  fi
+  _shellrc_colima_update --prompt
+  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  tests__colima_segment_hidden || return 1
 )
 
 test_colima_prompt_states() (
@@ -1494,7 +1534,7 @@ test_colima_prompt_states() (
   tests__colima_fixture "$tmp" || return 1
   export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" COLIMA_PROFILE=other
   export SHELLRC_COLIMA_TEST_LOG="$tmp/calls"
-  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID _SHELLRC_COLIMA_FIRST_PROMPT
   _shellrc_colima_update
   [ "$_SHELLRC_COLIMA_ICON" = '?' ] || return 1
   tests__colima_wait || return 1
@@ -1503,6 +1543,7 @@ test_colima_prompt_states() (
   [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
   command grep -F -- "$COLIMA_HOME/default/docker.sock" "$tmp/calls" >/dev/null || return 1
   if [ -n "${ZSH_VERSION-}" ]; then
+    _SHELLRC_COLIMA_FIRST_PROMPT=1
     _build_prompt 0
     case "$PROMPT" in *'%n%f]-[%F{46}●%f]-['*) :;; *) return 1;; esac
   else
@@ -1541,7 +1582,7 @@ tests__colima_segment_hidden() {
   if [ -n "${ZSH_VERSION-}" ]; then
     _build_prompt 0
     case "$PROMPT" in *'%n%f]-['*) :;; *) return 1;; esac
-    case "$PROMPT" in *'?%f]'*|*'[]'*|*']--['*) return 1;; esac
+    case "$PROMPT" in *'?%f]'*|*'●'*|*'[]'*|*']--['*) return 1;; esac
   else
     segment="$(eval "printf '%s' \"$colima\"")"
     case "$segment" in *'?'*|*'[]'*|*']-'*|*'●'*) return 1;; esac
@@ -1555,12 +1596,8 @@ test_colima_prompt_cache() (
   tests__colima_fixture "$tmp" || return 1
   export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage"
   export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=1
-  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
-  if [ -n "${ZSH_VERSION-}" ]; then
-    _build_prompt 0
-  else
-    _shellrc_colima_prompt_tick
-  fi
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID _SHELLRC_COLIMA_FIRST_PROMPT
+  _shellrc_colima_update
   first_pid="$_SHELLRC_COLIMA_PID"
   first_cache="$_SHELLRC_COLIMA_CACHE"
   [ ! -f "$first_cache/result.$_SHELLRC_COLIMA_GENERATION" ] || return 1
@@ -1637,7 +1674,6 @@ test_colima_prompt_hooks() (
     _shellrc_colima_prompt_tick
     [ "$_SHELLRC_PROMPT_EXIT_STATUS" -eq 0 ] || return 1
   fi
-  tests__colima_wait || return 1
   # Re-sourcing must preserve an existing exit trap and avoid duplicate prompt hooks.
   bash --noprofile --norc -ic '
     trap '\''printf "%s\n" "$?" >"$2/prior-exit"'\'' EXIT
