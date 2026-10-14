@@ -52,6 +52,7 @@ Before editing:
 ### 3.3 Execute (MUST)
 - Keep edits small and direct; do not refactor unless requested or required.
 - Preserve existing docstrings/comments unless explicitly asked to remove/change them.
+- Always document non-JSX functions with `/** ... */` comments following [JSDoc conventions](https://jsdoc.app), including a description and applicable `@param` and `@returns` tags.
 - After changes: run a targeted diff for the touched file(s) and summarize what changed and why.
 
 ### 3.4 Validate (SHOULD)

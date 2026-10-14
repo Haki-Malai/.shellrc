@@ -14,6 +14,26 @@
 
 ## 3) Startup Behavior
 
+### Managed Vim configuration
+- Expected behavior:
+  - Interactive shell startup uses the shared-file sync to install `shared/.vimrc` as `$HOME/.vimrc` and bundled Gruvbox color/autoload files and provenance under `$HOME/.vim/`.
+  - Repository copies are canonical; differing home copies are overwritten on sync. Identical files are skipped, and unrelated files in `$HOME/.vim/` are preserved.
+  - Vim enables absolute line numbers, current-line highlighting, five lines of scrolling context, cursor position, partial command display, and editing-mode display.
+  - Syntax and file-type plugins/indentation are enabled. Fallback indentation uses four spaces (`tabstop`, `shiftwidth`, and `softtabstop` are `4`, with `expandtab` and `autoindent` enabled); file-type rules may override it.
+  - Searches use `incsearch`, `hlsearch`, `ignorecase`, and `smartcase`. Normal-mode `Ctrl-L` clears search highlighting and redraws the screen.
+  - Backspace works over indentation, line breaks, and the insertion start. Command completion uses `wildmenu` and `wildmode=longest:full,full`.
+  - Mouse capture and persistent undo are disabled.
+  - Gruvbox uses a dark background and medium contrast. True color is enabled only when supported by Vim and advertised by `COLORTERM=truecolor` or `24bit`; otherwise terminal color detection is retained, including Gruvbox's 256-color mode.
+  - If the Gruvbox color file is absent, Vim opens without a missing-theme error using its default colors. The theme is bundled at the revision recorded in `shared/.vim/gruvbox-source.txt`; startup requires no network access or plugin manager.
+- Output pattern:
+  - Shared-file sync is quiet during shell startup. Vim displays its normal editor interface with the configured line numbers, syntax colors, and position information.
+- Side effects:
+  - Sync writes the managed files beneath `$HOME`. Vim edits and saves files through its normal commands.
+- Manual verification:
+  - Run `shell/shared-sync.sh`, compare the installed files with `shared/`, then open a disposable sample with `vim <sample>`.
+  - Check line numbers, dark colors, indentation, search with `/text`, and clearing highlights with `Ctrl-L`. Use `:<number>` to jump to a line, `:number` to print it, `:w` to save, and `:q` to quit; reopen and confirm saved content.
+  - Customize the repository copy, rather than `~/.vimrc`, to retain changes across shell startups.
+
 ### Directory history variable
 - Expected behavior:
   - After a successful `cd`, set `lastDir` to the directory from before the change.
@@ -369,6 +389,7 @@
 ### `shell/shared-sync.sh`
 - Expected behavior:
   - Copy files from `shared/` to `$HOME`, preserving relative paths.
+  - Includes the managed Vim configuration and bundled theme files; skips identical files, replaces differing managed copies, and preserves unrelated destination files.
   - `--quiet` suppresses informational stderr messages.
 - Output pattern:
   - Non-quiet mode may emit:
@@ -416,6 +437,10 @@ Contracts in this document are grounded in:
 - `tests/run.sh`
 - `tests/suite.sh`
 - `shell/shared-sync.sh`
+- `shared/.vimrc`
+- `shared/.vim/colors/gruvbox.vim`
+- `shared/.vim/autoload/gruvbox.vim`
+- `shared/.vim/gruvbox-source.txt`
 
 ## 10) Agent Specification Maintenance Rules
 - If an agent believes behavior may have changed from this specification (or is ambiguous), the agent must explicitly notify the user and request user verification/check before finalizing claims about expected behavior.

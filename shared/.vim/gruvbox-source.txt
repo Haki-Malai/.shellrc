@@ -1,0 +1,15 @@
+Gruvbox by Pavel Pertsev (morhetz <morhetz@gmail.com>)
+Upstream: https://github.com/morhetz/gruvbox
+Revision: ef8864bb42bf244f0295d1c5a403b27e3d139695
+
+colors/gruvbox.vim and autoload/gruvbox.vim are unmodified upstream files.
+Their original attribution headers are preserved.
+
+License: MIT/X11, as declared in the upstream README.md; package.json
+identifies the author as Pavel Pertsev and the license as MIT.
+License reference supplied by upstream: https://en.wikipedia.org/wiki/MIT_License
+Upstream license declaration:
+https://github.com/morhetz/gruvbox/blob/ef8864bb42bf244f0295d1c5a403b27e3d139695/README.md#license
+
+Updates are explicit: fetch both files from the same upstream revision,
+preserve their contents, update this revision record, and run ./tests/run.sh.

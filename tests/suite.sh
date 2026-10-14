@@ -29,6 +29,12 @@ tests_suite_main() {
   tests__shell="${BASH_VERSION:+bash}${ZSH_VERSION:+zsh}"
 
   run_test "env loads core modules" test_env_loads
+  run_test "Vim shared files install and sync idempotently" test_vim_shared_sync
+  if command -v vim >/dev/null 2>&1; then
+    run_test "Vim defaults and Gruvbox load across color modes" test_vim_configuration
+  else
+    printf '  skip Vim configuration checks (vim not installed)\n'
+  fi
   run_test "cd tracks previous directory" test_cd_tracks_previous_directory
   run_test "user switch moves out of foreign home" test_user_switch_moves_out_of_foreign_home
   run_test "pyenv skips foreign unwritable root" test_pyenv_skips_foreign_unwritable_root
@@ -115,6 +121,101 @@ test_env_loads() {
   type lscatclip >/dev/null 2>&1 || return 1
   type clip >/dev/null 2>&1 || return 1
 }
+
+# /**
+#  * Verify startup installation, unchanged-file skipping, and managed updates.
+#  * @returns {number} Zero when shared Vim files sync without disturbing other files.
+#  */
+test_vim_shared_sync() (
+  local tmp rel
+  tmp="$(make_tmp_dir)" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  for rel in .vimrc .vim/colors/gruvbox.vim .vim/autoload/gruvbox.vim .vim/gruvbox-source.txt; do
+    cmp -s "$DOTS_ROOT/shared/$rel" "$HOME/$rel" || return 1
+  done
+
+  env HOME="$tmp" "$DOTS_ROOT/shell/shared-sync.sh" --quiet || return 1
+  printf 'keep me\n' >"$tmp/.vim/unmanaged.vim"
+  touch -t 200001010000 "$tmp/.vimrc" || return 1
+  env HOME="$tmp" "$DOTS_ROOT/shell/shared-sync.sh" 2>"$tmp/sync-output" || return 1
+  [ ! -s "$tmp/sync-output" ] || return 1
+  [ "$tmp/.vimrc" -ot "$DOTS_ROOT/shared/.vimrc" ] || return 1
+
+  printf 'changed locally\n' >"$tmp/.vimrc"
+  env HOME="$tmp" "$DOTS_ROOT/shell/shared-sync.sh" --quiet || return 1
+  cmp -s "$DOTS_ROOT/shared/.vimrc" "$tmp/.vimrc" || return 1
+  [ "$(cat "$tmp/.vim/unmanaged.vim")" = 'keep me' ] || return 1
+)
+
+# /**
+#  * Load the installed vimrc and check editing behavior and theme fallbacks.
+#  * @returns {number} Zero when Vim starts correctly in every tested color mode.
+#  */
+test_vim_configuration() (
+  local tmp color
+  tmp="$(make_tmp_dir)" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  env HOME="$tmp" "$DOTS_ROOT/shell/shared-sync.sh" --quiet || return 1
+  cat >"$tmp/check.vim" <<'EOF'
+call assert_equal(expand('~/.vimrc'), $MYVIMRC)
+call assert_equal(1, &number)
+call assert_equal(0, &relativenumber)
+call assert_equal(1, &cursorline)
+call assert_equal(5, &scrolloff)
+call assert_equal([4, 4, 4, 1], [&tabstop, &shiftwidth, &softtabstop, &expandtab])
+call assert_equal(1, &autoindent)
+call assert_equal([1, 1, 1, 1], [&incsearch, &hlsearch, &ignorecase, &smartcase])
+call assert_equal([1, 1, 1], [&ruler, &showcmd, &showmode])
+call assert_equal('indent,eol,start', &backspace)
+call assert_equal(1, &wildmenu)
+call assert_equal('longest:full,full', &wildmode)
+call assert_equal('', &mouse)
+if has('persistent_undo')
+  call assert_equal(0, &undofile)
+endif
+call assert_true(exists('g:syntax_on'))
+call assert_equal(1, get(g:, 'did_load_filetypes', 0))
+call assert_equal(1, get(g:, 'did_load_ftplugin', 0))
+call assert_equal(1, get(g:, 'did_indent_on', 0))
+let mapping = maparg("\<C-l>", 'n', 0, 1)
+call assert_equal(':nohlsearch<CR><C-l>', get(mapping, 'rhs', ''))
+call assert_equal(1, get(mapping, 'noremap', 0))
+call assert_equal('dark', &background)
+call assert_equal('medium', g:gruvbox_contrast_dark)
+if has('termguicolors')
+  call assert_equal($COLORTERM ==# 'truecolor' || $COLORTERM ==# '24bit', &termguicolors)
+endif
+if $VIM_TEST_THEME ==# 'present'
+  call assert_equal('gruvbox', get(g:, 'colors_name', ''))
+  call assert_equal('235', synIDattr(hlID('Normal'), 'bg', 'cterm'))
+  call assert_true(exists('*GruvboxHlsShowCursor'))
+  call gruvbox#hls_show()
+  call assert_equal(1, &hlsearch)
+else
+  call assert_notequal('gruvbox', get(g:, 'colors_name', ''))
+endif
+if !empty(v:errors)
+  call writefile(v:errors, $VIM_TEST_ERRORS)
+  cquit
+endif
+qa!
+EOF
+  for color in '' truecolor 24bit; do
+    if ! env -i HOME="$tmp" PATH="$PATH" TERM=xterm-256color COLORTERM="$color" \
+      VIM_TEST_THEME=present VIM_TEST_ERRORS="$tmp/errors" \
+      vim -N -n -i NONE -T xterm-256color -S "$tmp/check.vim" >"$tmp/output" 2>&1; then
+      cat "$tmp/errors" "$tmp/output" 2>/dev/null
+      return 1
+    fi
+  done
+  rm "$tmp/.vim/colors/gruvbox.vim"
+  if ! env -i HOME="$tmp" PATH="$PATH" TERM=xterm-256color COLORTERM='' \
+    VIM_TEST_THEME=absent VIM_TEST_ERRORS="$tmp/errors" \
+    vim -N -n -i NONE -T xterm-256color -S "$tmp/check.vim" >"$tmp/output" 2>&1; then
+    cat "$tmp/errors" "$tmp/output" 2>/dev/null
+    return 1
+  fi
+)
 
 test_cd_tracks_previous_directory() {
   local base first second initial
