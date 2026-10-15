@@ -11,7 +11,7 @@ fi
 
 trap 'exit 130' INT
 trap 'exit 143' TERM
-for dependency in colima curl python3 ps; do
+for dependency in colima curl jq nc ps; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     printf 'colima-fix: required command not found: %s\n' "$dependency" >&2
     exit 127
@@ -19,7 +19,7 @@ for dependency in colima curl python3 ps; do
 done
 
 colima_home="${COLIMA_HOME:-$HOME/.colima}"
-health_helper="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/colima-health.py"
+health_helper="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/colima-health.sh"
 if [ ! -r "$colima_home/default/colima.yaml" ]; then
   printf 'colima-fix: default profile storage/configuration unavailable: %s\n' "$colima_home/default/colima.yaml" >&2
   exit 1
@@ -34,7 +34,7 @@ if [ ! -r "$colima_home/default/colima.yaml" ]; then
   exit 1
 fi
 printf 'colima-fix: cleaning leftover default-profile SSH masters\n'
-python3 "$health_helper" cleanup "$colima_home" || exit 1
+bash "$health_helper" cleanup "$colima_home" || exit 1
 printf 'colima-fix: starting default profile\n'
 colima --profile default start
 start_status=$?
@@ -57,5 +57,5 @@ if ! containers="$(curl --noproxy '*' --silent --show-error --fail --max-time 3 
   printf 'colima-fix: cannot inspect published container ports\n' >&2
   exit 1
 fi
-printf '%s\n' "$containers" | python3 "$health_helper" verify || exit 1
+printf '%s\n' "$containers" | bash "$health_helper" verify || exit 1
 printf 'colima-fix: default profile recovered; Docker is responding; supported published service checks passed\n'

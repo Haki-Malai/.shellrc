@@ -339,9 +339,9 @@
 ### `shell/colima-fix.sh`
 - Expected behavior:
   - Accepts no arguments or `--help`; rejects other arguments.
-  - Requires `colima`, `curl`, `python3`, `ps`, and readable `${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml`; checks storage again before startup and refuses unavailable storage/configuration without creating directories.
+  - Requires `colima`, `curl`, `jq`, `nc` (with `-w` timeout support), `ps`, and readable `${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml`; checks storage again before startup and refuses unavailable storage/configuration without creating directories.
   - Runs `colima --profile default stop`, `colima --profile default stop --force`, SSH cleanup, then `colima --profile default start`. Both stop failures are reported but do not prevent later recovery steps unless the default profile host agent is still running.
-  - Before startup, `shell/colima-health.py` sends TERM only to current-user SSH masters whose full process title exactly matches this storage directory’s `_lima/colima/ssh.sock [mux]`. It rechecks identity before signaling, waits up to five seconds for all matching masters to exit, and refuses startup if cleanup fails. No control socket is required, and no new master is started before old masters finish exiting.
+  - Before startup, `shell/colima-health.sh` sends TERM only to current-user SSH masters whose full process title exactly matches this storage directory’s `_lima/colima/ssh.sock [mux]`. It rechecks identity before signaling, waits up to five seconds for all matching masters to exit, and refuses startup if cleanup fails. No control socket is required, and no new master is started before old masters finish exiting.
   - Ignores `COLIMA_PROFILE`. Preserves upstream diagnostics; after startup, requires a successful Docker `GET /_ping` response with body `OK`, using the profile socket with five attempts, a one-second timeout per attempt, and one-second retry delays. Local socket probes bypass HTTP proxies.
   - Reads running containers from Docker `GET /containers/json` (three-second timeout), then verifies published TCP ports by container port: PostgreSQL 5432 via SSL negotiation (`S`/`N`), Valkey/Redis 6379 via PING (`PONG` or an authentication-required response), and LocalStack 4566 via HTTP 200 JSON containing `services` at `/_localstack/health`. Host ports are discovered, including remapped ports such as 15432 and 16379. Wildcard bindings are checked through loopback. Each service gets five attempts with one-second socket timeouts and retry delays; an accepting-but-silent tunnel fails.
   - Reports when no supported published services are running. Other protocols and unpublished services are not checked. Protocol responses establish forwarding, not authenticated database queries, Prisma connectivity, or individual LocalStack service readiness.
@@ -356,7 +356,7 @@
 - Side effects:
   - Stops and restarts the default VM, interrupting its running workloads, and terminates matching leftover SSH masters after shutdown. Colima recreates its normal forwards during startup using the existing configuration; the script does not hard-code SSH forwarding rules or change other profiles.
 - Manual verification:
-  - `shell/colima-fix.sh --help`; with temporary `colima`/`curl`/`ps` stubs, verify order, continuing after stop failures, and refusing cleanup/startup/health failures. Use connected socket fixtures to verify service responses and rejection of silent peers. For a live check, verify the first prompt in Bash/Zsh and probe supported published services; a real recovery interrupts the default VM.
+  - `shell/colima-fix.sh --help`; with temporary `colima`/`curl`/`ps` stubs, verify order, continuing after stop failures, and refusing cleanup/startup/health failures. Use shell fixtures to verify process matching, request bytes, service responses, retries, and rejection of silent peers. For a live check, verify the first prompt in Bash/Zsh and probe supported published services; a real recovery interrupts the default VM.
 
 ### `tests/run.sh`
 - Expected behavior:
@@ -431,7 +431,7 @@ Contracts in this document are grounded in:
 - `shell/functions/lstype.sh`
 - `shell/functions/gdc.sh`
 - `shell/colima-fix.sh`
-- `shell/colima-health.py`
+- `shell/colima-health.sh`
 - `shell/rc/01-user-context.sh`
 - `shell/rc/05-pyenv.sh`
 - `shell/rc/12-safety-keys.sh`

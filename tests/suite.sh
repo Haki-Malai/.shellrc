@@ -1571,9 +1571,10 @@ test_colima_fix_preconditions() (
   unset SHELLRC_COLIMA_TEST_DISCONNECT
 
   # Invoke Bash directly with an isolated PATH so installed tools cannot mask missing dependencies.
-  local bash_bin python_bin
+  local bash_bin jq_bin nc_bin
   bash_bin="$(command -v bash)"
-  python_bin="$(command -v python3)"
+  jq_bin="$(command -v jq)"
+  nc_bin="$(command -v nc)"
   export PATH="$tmp/bin" COLIMA_HOME="$tmp/storage"
   /bin/rm "$tmp/bin/curl"
   rc=0
@@ -1584,8 +1585,13 @@ test_colima_fix_preconditions() (
   rc=0
   "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
   [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
-  /usr/bin/grep -F 'required command not found: python3' "$tmp/output" >/dev/null || return 1
-  /bin/ln -s "$python_bin" "$tmp/bin/python3"
+  /usr/bin/grep -F 'required command not found: jq' "$tmp/output" >/dev/null || return 1
+  /bin/ln -s "$jq_bin" "$tmp/bin/jq"
+  rc=0
+  "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
+  /usr/bin/grep -F 'required command not found: nc' "$tmp/output" >/dev/null || return 1
+  /bin/ln -s "$nc_bin" "$tmp/bin/nc"
   /bin/rm "$tmp/bin/ps"
   rc=0
   "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
@@ -1603,99 +1609,178 @@ test_colima_fix_preconditions() (
 #  * @returns Success only when cleanup and silent-tunnel regressions pass.
 #  */
 test_colima_health_protocols() (
-  python3 - "$DOTS_ROOT/shell/colima-health.py" <<'PYTEST'
-import importlib.util
-import os
-import signal
-import socket
-import sys
-from unittest.mock import Mock, patch
+  local tmp
+  tmp="$(make_tmp_dir)" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  bash -s -- "$DOTS_ROOT/shell/colima-health.sh" "$tmp" <<'SHELLTEST'
+set -eu
+. "$1"
+fixture="$2"
+mkdir "$fixture/storage space"
+instance="$fixture/storage space/_lima/colima"
+mode=normal
+printf '0' >"$fixture/ps-count"
+: >"$fixture/kills"
 
-sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location("health", sys.argv[1])
-health = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(health)
-try:
-    health.verify({})
-    raise AssertionError("invalid container list accepted")
-except ValueError:
-    pass
-master = "ssh: /tmp/colima test/_lima/colima/ssh.sock [mux]"
-other = "ssh: /tmp/colima test/_lima/colima-other/ssh.sock [mux]"
-rows = f"{os.getuid()} 101 {master}   \n{os.getuid()+1} 102 {master}\n{os.getuid()} 103 {other}\n"
-with patch.object(health.subprocess, "check_output", return_value=rows):
-    assert health.processes() == {101: master, 103: other}
-with patch.object(health, "processes", side_effect=[{101: master, 103: other}, {101: master}, {}]), patch.object(health.os, "kill") as kill:
-    health.cleanup("/tmp/colima test/")
-    kill.assert_called_once_with(101, signal.SIGTERM)
-# A PID reused between discovery and signaling must not be killed.
-with patch.object(health, "processes", side_effect=[{101: master}, {101: "unrelated"}, {}]), patch.object(health.os, "kill") as kill:
-    health.cleanup("/tmp/colima test")
-    kill.assert_not_called()
-with patch.object(health, "processes", return_value={101: master}), patch.object(health.os, "kill"), patch.object(health.time, "monotonic", side_effect=[0, 6]):
-    try:
-        health.cleanup("/tmp/colima test")
-        raise AssertionError("surviving SSH master accepted")
-    except RuntimeError as error:
-        assert "refusing startup" in str(error)
-with patch.object(health, "processes", return_value={99: "/usr/bin/limactl hostagent --pidfile /tmp/colima test/_lima/colima/ha.pid --socket x"}), patch.object(health.os, "kill") as kill:
-    try:
-        health.cleanup("/tmp/colima test")
-        raise AssertionError("running host agent accepted")
-    except RuntimeError as error:
-        assert "host agent is still running" in str(error)
-    kill.assert_not_called()
+# /** Supply process snapshots without inspecting or signaling live processes.
+#  * @returns Fixture process rows, or a simulated inspection failure.
+#  */
+ps() {
+  local count
+  count="$(<"$fixture/ps-count")"
+  count=$((count + 1))
+  printf '%s' "$count" >"$fixture/ps-count"
+  [ "$mode" != inspection-failure ] || return 1
+  if [ "$mode" = hostagent ]; then
+    printf '%s 99 /usr/bin/limactl hostagent --pidfile %s/ha.pid --socket x\n' "$UID" "$instance"
+  fi
+  if [ ! -f "$fixture/killed" ] && { [ "$mode" != reused ] || [ "$count" -eq 1 ]; }; then
+    printf '%s 101 ssh: %s/ssh.sock [mux]   \n' "$UID" "$instance"
+  fi
+  printf '%s 102 ssh: %s/ssh.sock [mux]\n' "$((UID + 1))" "$instance"
+  printf '%s 103 ssh: %s-other/ssh.sock [mux]\n' "$UID" "$instance"
+}
 
-# Real connected sockets exercise valid, malformed, and accepting-but-silent peers.
-for service, response, succeeds in [
-    (5432, b"N", True), (5432, b"S", True), (5432, b"X", False),
-    (6379, b"+PONG\r\n", True), (6379, b"-NOAUTH Authentication required.\r\n", True),
-    (6379, b"+OK\r\n", False),
-    (4566, b'HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{"services":{}}', True),
-    (4566, b'HTTP/1.1 500 Error\r\nContent-Length: 15\r\n\r\n{"services":{}}', False),
-    (5432, None, False), (6379, None, False), (4566, None, False),
-]:
-    client, server = socket.socketpair()
-    client.settimeout(0.02)
-    try:
-        if response is not None:
-            server.sendall(response)
-        peer = client
-        if service == 4566:
-            # Unix socket pairs do not implement TCP_NODELAY used by http.client.
-            peer = Mock(wraps=client)
-            peer.setsockopt.return_value = None
-        with patch.object(socket, "create_connection", return_value=peer):
-            try:
-                health.probe("127.0.0.1", 15432, service)
-                assert succeeds, (service, response)
-            except (OSError, RuntimeError, ValueError):
-                assert not succeeds, (service, response)
-    finally:
-        client.close()
-        server.close()
-containers = [{"Ports": [
-    {"Type": "tcp", "PrivatePort": 5432, "PublicPort": 15432, "IP": "0.0.0.0"},
-    {"Type": "tcp", "PrivatePort": 6379, "PublicPort": 16379, "IP": "127.0.0.1"},
-    {"Type": "tcp", "PrivatePort": 4566, "PublicPort": 4566, "IP": "::"},
-    {"Type": "tcp", "PrivatePort": 5432},
-    {"Type": "udp", "PrivatePort": 5432, "PublicPort": 15433},
-    {"Type": "tcp", "PrivatePort": 80, "PublicPort": 8080},
-]}]
-with patch.object(health, "probe") as probe:
-    health.verify(containers)
-    assert {call.args for call in probe.call_args_list} == {
-        ("127.0.0.1", 15432, 5432), ("127.0.0.1", 16379, 6379), ("::1", 4566, 4566)}
-with patch.object(health, "probe", side_effect=[TimeoutError("silent"), None]), patch.object(health.time, "sleep"):
-    health.verify([{"Ports": [containers[0]["Ports"][0]]}])
-with patch.object(health, "probe", side_effect=TimeoutError("silent")) as probe, patch.object(health.time, "sleep"):
-    try:
-        health.verify([{"Ports": [containers[0]["Ports"][0]]}])
-        raise AssertionError("silent forward accepted")
-    except RuntimeError as error:
-        assert "15432 failed" in str(error)
-        assert probe.call_count == 5
-PYTEST
+# /** Record signals instead of sending them.
+#  * @param $* Signal and process ID.
+#  * @returns Success with optional simulated process disappearance.
+#  */
+kill() {
+  printf '%s\n' "$*" >>"$fixture/kills"
+  [ "$mode" = lingering ] || : >"$fixture/killed"
+}
+
+# /** Skip retry delays in deterministic fixtures.
+#  * @param $1 Requested delay.
+#  * @returns Success.
+#  */
+sleep() { :; }
+
+colima_health_cleanup "$fixture/storage space"
+[ "$(<"$fixture/kills")" = '-TERM 101' ]
+for mode in reused hostagent lingering inspection-failure; do
+  rm -f "$fixture/killed"
+  : >"$fixture/kills"
+  printf '0' >"$fixture/ps-count"
+  if [ "$mode" = reused ]; then
+    colima_health_cleanup "$fixture/storage space"
+    [ ! -s "$fixture/kills" ]
+  else
+    if colima_health_cleanup "$fixture/storage space" >"$fixture/error" 2>&1; then exit 1; fi
+    case "$mode" in
+      hostagent) grep -q 'host agent is still running' "$fixture/error"; [ ! -s "$fixture/kills" ] ;;
+      lingering) grep -q 'refusing startup' "$fixture/error" ;;
+    esac
+  fi
+done
+
+# /** Capture raw request bytes and emulate responsive, invalid, or silent peers.
+#  * @param $* Netcat options, host, and port.
+#  * @returns Fixture connection status and response bytes.
+#  */
+nc() {
+  [ "$1 $2" = '-w 1' ] || return 99
+  printf '%s\n' "$*" >>"$fixture/nc-calls"
+  od -An -tx1 | tr -d ' \n' >"$fixture/request"
+  printf '%s' "$reply"
+  return "${nc_status:-0}"
+}
+# /** Supply LocalStack HTTP status and JSON without network access.
+#  * @param $* Curl arguments.
+#  * @returns Fixture HTTP response or simulated curl failure.
+#  */
+curl() {
+  printf '%s\n' "$*" >"$fixture/curl-call"
+  printf '%s' "$http_reply"
+  return "${curl_status:-0}"
+}
+for reply in N S; do colima_health_probe 127.0.0.1 15432 5432; done
+[ "$(<"$fixture/request")" = 0000000804d2162f ]
+for reply in X ''; do if colima_health_probe 127.0.0.1 15432 5432; then exit 1; fi; done
+for reply in $'+PONG\r\n' $'-NOAUTH Authentication required.\r\n'; do
+  colima_health_probe 127.0.0.1 16379 6379
+done
+[ "$(<"$fixture/request")" = 2a310d0a24340d0a50494e470d0a ]
+for reply in $'+OK\r\n' ''; do if colima_health_probe 127.0.0.1 16379 6379; then exit 1; fi; done
+reply=N nc_status=1
+if colima_health_probe 127.0.0.1 15432 5432; then exit 1; fi
+unset nc_status
+http_reply=$'{"services":{}}\n200'
+colima_health_probe ::1 4566 4566
+grep -F 'http://[::1]:4566/_localstack/health' "$fixture/curl-call"
+for http_reply in $'{"services":{}}\n500' $'{}\n200' $'invalid\n200' ''; do
+  if colima_health_probe 127.0.0.1 4566 4566 2>/dev/null; then exit 1; fi
+done
+http_reply=$'{"services":{}}\n200' curl_status=28
+if colima_health_probe 127.0.0.1 4566 4566; then exit 1; fi
+unset curl_status
+
+# /** Model nc exiting on early stdin EOF before a delayed reply arrives.
+#  * @param $* Netcat options, host, and port.
+#  * @returns A protocol response only if the producer keeps stdin open.
+#  */
+nc() {
+  local count reply started
+  case "$4" in 15432) count=8; reply=N ;; 16379) count=14; reply=$'+PONG\r\n' ;; esac
+  dd bs=1 count="$count" of=/dev/null 2>/dev/null
+  started=$SECONDS
+  IFS= read -r -t 1 unused || true
+  [ "$((SECONDS - started))" -ge 1 ] || return 1
+  printf '%s' "$reply"
+}
+# /** Hold fixture stdin open past Bash 3.2's integer-only read timeout.
+#  * @param $1 Requested delay.
+#  * @returns Success after the fixture response window.
+#  */
+sleep() { command sleep 2; }
+colima_health_probe 127.0.0.1 15432 5432
+colima_health_probe 127.0.0.1 16379 6379
+# /** Skip retry delays after the real EOF timing regression.
+#  * @param $1 Requested delay.
+#  * @returns Success.
+#  */
+sleep() { :; }
+for invalid in '{}' invalid '' '[] []'; do
+  if printf '%s' "$invalid" | colima_health_verify 2>/dev/null; then exit 1; fi
+done
+printf '[]' | colima_health_verify
+
+# /** Record discovered endpoints and simulate transient or persistent failures.
+#  * @param $* Host, published port, and container port.
+#  * @returns Status selected by the retry fixture.
+#  */
+colima_health_probe() {
+  printf '%s\n' "$*" >>"$fixture/probes"
+  case "$mode" in
+    silent) return 1 ;;
+    transient) mode=healthy; return 1 ;;
+  esac
+}
+mode=healthy
+: >"$fixture/probes"
+printf '%s' '[{"Ports":[
+  {"Type":"tcp","PrivatePort":5432,"PublicPort":15432,"IP":"0.0.0.0"},
+  {"Type":"tcp","PrivatePort":6379,"PublicPort":16379,"IP":"127.0.0.1"},
+  {"Type":"tcp","PrivatePort":4566,"PublicPort":4566,"IP":"::"},
+  {"Type":"tcp","PrivatePort":5432},
+  {"Type":"udp","PrivatePort":5432,"PublicPort":15433},
+  {"Type":"tcp","PrivatePort":80,"PublicPort":8080}
+]}]' | colima_health_verify
+[ "$(wc -l <"$fixture/probes" | tr -d ' ')" -eq 3 ]
+grep -qx '127.0.0.1 15432 5432' "$fixture/probes"
+grep -qx '127.0.0.1 16379 6379' "$fixture/probes"
+grep -qx '::1 4566 4566' "$fixture/probes"
+container='[{"Ports":[{"Type":"tcp","PrivatePort":5432,"PublicPort":15432}]}]'
+mode=transient
+: >"$fixture/probes"
+printf '%s' "$container" | colima_health_verify
+[ "$(wc -l <"$fixture/probes" | tr -d ' ')" -eq 2 ]
+mode=silent
+: >"$fixture/probes"
+if printf '%s' "$container" | colima_health_verify >"$fixture/error" 2>&1; then exit 1; fi
+[ "$(wc -l <"$fixture/probes" | tr -d ' ')" -eq 5 ]
+grep -q '15432 failed' "$fixture/error"
+SHELLTEST
 )
 
 # /** Check that first-prompt probes are not suppressed by worker/cache failures.
