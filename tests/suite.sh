@@ -74,7 +74,9 @@ tests_suite_main() {
   run_test "lstype dir arg" test_lstype_dir_arg
   run_test "colima-fix recovery and failure handling" test_colima_fix_recovery
   run_test "colima-fix rejects unavailable storage and dependencies" test_colima_fix_preconditions
-  run_test "Colima initial health check completes during shell initialization" test_colima_prompt_initial_check
+  run_test "Colima SSH cleanup and service response checks" test_colima_health_protocols
+  run_test "Colima synchronous check bypasses missing cache and running workers" test_colima_prompt_sync_races
+  run_test "Colima startup and prompts do not wait for a slow health check" test_colima_prompt_initial_check
   run_test "Colima prompt health states and placement" test_colima_prompt_states
   run_test "Colima prompt cache and background worker" test_colima_prompt_cache
   run_test "Colima worker is detached without disowning other jobs" test_colima_worker_detached
@@ -1454,10 +1456,19 @@ EOF
 #!/bin/sh
 printf 'curl %s\n' "$*" >>"$SHELLRC_COLIMA_TEST_LOG"
 [ "${SHELLRC_COLIMA_TEST_DELAY:-0}" = 0 ] || sleep "$SHELLRC_COLIMA_TEST_DELAY"
+case "$*" in
+  *http://localhost/containers/json)
+    printf '%s' "${SHELLRC_COLIMA_TEST_CONTAINERS-[]}"
+    exit "${SHELLRC_COLIMA_TEST_PORTS_CURL:-0}" ;;
+esac
 printf '%s' "${SHELLRC_COLIMA_TEST_BODY-OK}"
 exit "${SHELLRC_COLIMA_TEST_CURL:-0}"
 EOF
-  chmod +x "$1/bin/colima" "$1/bin/curl"
+  cat >"$1/bin/ps" <<'EOF'
+#!/bin/sh
+exit "${SHELLRC_COLIMA_TEST_PS:-0}"
+EOF
+  chmod +x "$1/bin/colima" "$1/bin/curl" "$1/bin/ps"
   ln -s "$(command -v mv)" "$1/bin/mv"
 }
 
@@ -1492,6 +1503,28 @@ test_colima_fix_recovery() (
   [ "$rc" -eq 7 ] || return 1
   ! command grep -q '^curl ' "$tmp/calls" || return 1
   unset SHELLRC_COLIMA_TEST_START
+
+  : >"$tmp/calls"
+  export SHELLRC_COLIMA_TEST_PS=1
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  ! command grep -F -- '--profile default start' "$tmp/calls" || return 1
+  unset SHELLRC_COLIMA_TEST_PS
+
+  export SHELLRC_COLIMA_TEST_CONTAINERS=invalid
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  ! command grep -F 'default profile recovered' "$tmp/output" || return 1
+  unset SHELLRC_COLIMA_TEST_CONTAINERS
+
+  export SHELLRC_COLIMA_TEST_PORTS_CURL=28
+  rc=0
+  "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  command grep -F 'cannot inspect published container ports' "$tmp/output" >/dev/null || return 1
+  unset SHELLRC_COLIMA_TEST_PORTS_CURL
 
   export SHELLRC_COLIMA_TEST_CURL=28
   rc=0
@@ -1538,20 +1571,174 @@ test_colima_fix_preconditions() (
   unset SHELLRC_COLIMA_TEST_DISCONNECT
 
   # Invoke Bash directly with an isolated PATH so installed tools cannot mask missing dependencies.
-  local bash_bin
+  local bash_bin python_bin
   bash_bin="$(command -v bash)"
+  python_bin="$(command -v python3)"
   export PATH="$tmp/bin" COLIMA_HOME="$tmp/storage"
   /bin/rm "$tmp/bin/curl"
   rc=0
   "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
   [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
   /usr/bin/grep -F 'required command not found: curl' "$tmp/output" >/dev/null || return 1
+  /bin/ln -s /usr/bin/true "$tmp/bin/curl"
+  rc=0
+  "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
+  /usr/bin/grep -F 'required command not found: python3' "$tmp/output" >/dev/null || return 1
+  /bin/ln -s "$python_bin" "$tmp/bin/python3"
+  /bin/rm "$tmp/bin/ps"
+  rc=0
+  "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
+  [ "$rc" -eq 127 ] && [ ! -s "$tmp/calls" ] || return 1
+  /usr/bin/grep -F 'required command not found: ps' "$tmp/output" >/dev/null || return 1
   /bin/rm "$tmp/bin/colima"
   rc=0
   "$bash_bin" "$DOTS_ROOT/shell/colima-fix.sh" >"$tmp/output" 2>&1 || rc=$?
   [ "$rc" -eq 127 ] || return 1
   /usr/bin/grep -F 'required command not found: colima' "$tmp/output" >/dev/null || return 1
   export PATH=/usr/bin:/bin
+)
+
+# /** Exercise process selection and protocol responses without touching live Colima.
+#  * @returns Success only when cleanup and silent-tunnel regressions pass.
+#  */
+test_colima_health_protocols() (
+  python3 - "$DOTS_ROOT/shell/colima-health.py" <<'PYTEST'
+import importlib.util
+import os
+import signal
+import socket
+import sys
+from unittest.mock import Mock, patch
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("health", sys.argv[1])
+health = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(health)
+try:
+    health.verify({})
+    raise AssertionError("invalid container list accepted")
+except ValueError:
+    pass
+master = "ssh: /tmp/colima test/_lima/colima/ssh.sock [mux]"
+other = "ssh: /tmp/colima test/_lima/colima-other/ssh.sock [mux]"
+rows = f"{os.getuid()} 101 {master}   \n{os.getuid()+1} 102 {master}\n{os.getuid()} 103 {other}\n"
+with patch.object(health.subprocess, "check_output", return_value=rows):
+    assert health.processes() == {101: master, 103: other}
+with patch.object(health, "processes", side_effect=[{101: master, 103: other}, {101: master}, {}]), patch.object(health.os, "kill") as kill:
+    health.cleanup("/tmp/colima test/")
+    kill.assert_called_once_with(101, signal.SIGTERM)
+# A PID reused between discovery and signaling must not be killed.
+with patch.object(health, "processes", side_effect=[{101: master}, {101: "unrelated"}, {}]), patch.object(health.os, "kill") as kill:
+    health.cleanup("/tmp/colima test")
+    kill.assert_not_called()
+with patch.object(health, "processes", return_value={101: master}), patch.object(health.os, "kill"), patch.object(health.time, "monotonic", side_effect=[0, 6]):
+    try:
+        health.cleanup("/tmp/colima test")
+        raise AssertionError("surviving SSH master accepted")
+    except RuntimeError as error:
+        assert "refusing startup" in str(error)
+with patch.object(health, "processes", return_value={99: "/usr/bin/limactl hostagent --pidfile /tmp/colima test/_lima/colima/ha.pid --socket x"}), patch.object(health.os, "kill") as kill:
+    try:
+        health.cleanup("/tmp/colima test")
+        raise AssertionError("running host agent accepted")
+    except RuntimeError as error:
+        assert "host agent is still running" in str(error)
+    kill.assert_not_called()
+
+# Real connected sockets exercise valid, malformed, and accepting-but-silent peers.
+for service, response, succeeds in [
+    (5432, b"N", True), (5432, b"S", True), (5432, b"X", False),
+    (6379, b"+PONG\r\n", True), (6379, b"-NOAUTH Authentication required.\r\n", True),
+    (6379, b"+OK\r\n", False),
+    (4566, b'HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{"services":{}}', True),
+    (4566, b'HTTP/1.1 500 Error\r\nContent-Length: 15\r\n\r\n{"services":{}}', False),
+    (5432, None, False), (6379, None, False), (4566, None, False),
+]:
+    client, server = socket.socketpair()
+    client.settimeout(0.02)
+    try:
+        if response is not None:
+            server.sendall(response)
+        peer = client
+        if service == 4566:
+            # Unix socket pairs do not implement TCP_NODELAY used by http.client.
+            peer = Mock(wraps=client)
+            peer.setsockopt.return_value = None
+        with patch.object(socket, "create_connection", return_value=peer):
+            try:
+                health.probe("127.0.0.1", 15432, service)
+                assert succeeds, (service, response)
+            except (OSError, RuntimeError, ValueError):
+                assert not succeeds, (service, response)
+    finally:
+        client.close()
+        server.close()
+containers = [{"Ports": [
+    {"Type": "tcp", "PrivatePort": 5432, "PublicPort": 15432, "IP": "0.0.0.0"},
+    {"Type": "tcp", "PrivatePort": 6379, "PublicPort": 16379, "IP": "127.0.0.1"},
+    {"Type": "tcp", "PrivatePort": 4566, "PublicPort": 4566, "IP": "::"},
+    {"Type": "tcp", "PrivatePort": 5432},
+    {"Type": "udp", "PrivatePort": 5432, "PublicPort": 15433},
+    {"Type": "tcp", "PrivatePort": 80, "PublicPort": 8080},
+]}]
+with patch.object(health, "probe") as probe:
+    health.verify(containers)
+    assert {call.args for call in probe.call_args_list} == {
+        ("127.0.0.1", 15432, 5432), ("127.0.0.1", 16379, 6379), ("::1", 4566, 4566)}
+with patch.object(health, "probe", side_effect=[TimeoutError("silent"), None]), patch.object(health.time, "sleep"):
+    health.verify([{"Ports": [containers[0]["Ports"][0]]}])
+with patch.object(health, "probe", side_effect=TimeoutError("silent")) as probe, patch.object(health.time, "sleep"):
+    try:
+        health.verify([{"Ports": [containers[0]["Ports"][0]]}])
+        raise AssertionError("silent forward accepted")
+    except RuntimeError as error:
+        assert "15432 failed" in str(error)
+        assert probe.call_count == 5
+PYTEST
+)
+
+# /** Check that first-prompt probes are not suppressed by worker/cache failures.
+#  * @returns Success when synchronous checks produce a completed health state.
+#  */
+test_colima_prompt_sync_races() (
+  local tmp
+  tmp="$(make_tmp_dir)" || return 1
+  trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
+  tests__colima_fixture "$tmp" || return 1
+  export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage"
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=0.2
+  unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  _shellrc_colima_update
+  COLIMA_HOME="$tmp/other storage"
+  _shellrc_colima_update --sync
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
+  command grep -F -- "$COLIMA_HOME/default/docker.sock" "$tmp/calls" >/dev/null || return 1
+  tests__colima_wait || return 1
+  unset _SHELLRC_COLIMA_PID
+  # Losing the result inside the five-second throttle must not produce '?'.
+  rm "$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+  _SHELLRC_COLIMA_LAST=$SECONDS
+  _shellrc_colima_update --sync
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
+  local IFS=:
+  _shellrc_colima_update --sync
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
+  # Cache creation and writes are optional for a synchronous result.
+  _shellrc_colima_cleanup
+  cat >"$tmp/bin/mktemp" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+  chmod +x "$tmp/bin/mktemp"
+  _shellrc_colima_update --sync
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
+  rm "$tmp/bin/mktemp"
+  _shellrc_colima_update --sync
+  rm -rf "$_SHELLRC_COLIMA_CACHE"
+  : >"$_SHELLRC_COLIMA_CACHE"
+  _shellrc_colima_update --sync
+  [ "$_SHELLRC_COLIMA_COLOR" = 46 ] || return 1
 )
 
 tests__colima_wait() {
@@ -1563,68 +1750,50 @@ tests__colima_wait() {
   done
 }
 
+# /** Verify a slow probe never blocks startup or prompts and displays once ready.
+#  * @returns Success when pending, healthy, unavailable, and unknown states render correctly.
+#  */
 test_colima_prompt_initial_check() (
-  local tmp
+  local tmp expected
   tmp="$(make_tmp_dir)" || return 1
   trap '_shellrc_colima_cleanup; rm -rf "$tmp"' EXIT
   tests__colima_fixture "$tmp" || return 1
   export PATH="$tmp/bin:$PATH" COLIMA_HOME="$tmp/storage" COLIMA_PROFILE=other
-  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=0.2
+  export SHELLRC_COLIMA_TEST_LOG="$tmp/calls" SHELLRC_COLIMA_TEST_DELAY=1
   unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
+  for expected in 46 196; do
+    : >"$tmp/calls"
+    if [ "$expected" = 196 ]; then export SHELLRC_COLIMA_TEST_CURL=28; fi
+    . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
+    # Returning while the delayed worker is still alive proves no synchronous wait.
+    kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null || return 1
+    _shellrc_colima_update --prompt
+    kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null || return 1
+    [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+    [ "${_SHELLRC_COLIMA_FIRST_PROMPT-}" = 1 ] || return 1
+    tests__colima_wait || return 1
+    # Slow remaining startup must reuse the completed result without a second probe.
+    if [ "$expected" = 46 ]; then
+      printf '%s healthy\n' "$((SECONDS - 5))" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+    fi
+    _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
+    if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
+    [ "$_SHELLRC_COLIMA_COLOR" = "$expected" ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
+    [ -z "${_SHELLRC_COLIMA_FIRST_PROMPT-}" ] || return 1
+    [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
+    _shellrc_colima_update --prompt
+    tests__colima_segment_hidden || return 1
+    [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
+    _shellrc_colima_cleanup
+  done
+  unset SHELLRC_COLIMA_TEST_CURL SHELLRC_COLIMA_TEST_DELAY
   . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
-  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
-  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
-  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
-  command grep -F -- '--fail --max-time 1' "$tmp/calls" >/dev/null || return 1
-  # A fresh first prompt reuses the completed result without another check.
-  _shellrc_colima_update
-  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] || return 1
-  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 1 ] || return 1
-
-  # Startup after this module may take longer than the cache lifetime.
-  printf '%s healthy\n' "$((SECONDS - 5))" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
-  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
-  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
-  [ "$_SHELLRC_COLIMA_COLOR" -eq 46 ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
-  [ -z "${_SHELLRC_COLIMA_FIRST_PROMPT-}" ] || return 1
-  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
-  _shellrc_colima_update --prompt
-  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
-  tests__colima_segment_hidden || return 1
-  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
-  _shellrc_colima_update --prompt
-  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
-  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 2 ] || return 1
-
-  _shellrc_colima_cleanup
-  export SHELLRC_COLIMA_TEST_CURL=28
-  . "$DOTS_ROOT/shell/rc/50-prompt.sh" || return 1
-  [ "$_SHELLRC_COLIMA_COLOR" -eq 196 ] && [ "$_SHELLRC_COLIMA_ICON" = '●' ] || return 1
-  [ -z "${_SHELLRC_COLIMA_PID-}" ] || return 1
-  printf '%s unavailable\n' "$((SECONDS - 5))" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
-  _SHELLRC_COLIMA_LAST=$((SECONDS - 5))
-  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
-  [ "$_SHELLRC_COLIMA_COLOR" -eq 196 ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '●' ] || return 1
-  if [ -n "${ZSH_VERSION-}" ]; then
-    case "$PROMPT" in *'%n%f]-[%F{196}●%f]-['*) :;; *) return 1;; esac
-  fi
-  [ "$(wc -l <"$tmp/calls" | tr -d ' ')" -eq 4 ] || return 1
-  _shellrc_colima_update --prompt
-  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
-  tests__colima_segment_hidden || return 1
-
-  # A completed unknown check is visible only on the first prompt.
+  tests__colima_wait || return 1
+  # A completed unknown check is distinct from a pending check and is displayed once.
   printf '%s unknown\n' "$SECONDS" >"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
-  _SHELLRC_COLIMA_FIRST_PROMPT=1
-  if [ -n "${ZSH_VERSION-}" ]; then _build_prompt 0; else _shellrc_colima_prompt_tick; fi
-  [ "$_SHELLRC_COLIMA_ICON" = '?' ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '?' ] || return 1
-  if [ -n "${ZSH_VERSION-}" ]; then
-    case "$PROMPT" in *'%n%f]-[%F{244}?%f]-['*) :;; *) return 1;; esac
-  else
-    case "$(eval "printf '%s' \"$colima\"")" in *'?'*) :;; *) return 1;; esac
-  fi
   _shellrc_colima_update --prompt
-  [ -z "${_SHELLRC_COLIMA_VISIBLE-}" ] || return 1
+  [ "$_SHELLRC_COLIMA_ICON" = '?' ] && [ "${_SHELLRC_COLIMA_VISIBLE-}" = '?' ] || return 1
+  _shellrc_colima_update --prompt
   tests__colima_segment_hidden || return 1
 )
 

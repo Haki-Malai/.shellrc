@@ -76,19 +76,20 @@
 
 ### Colima Docker health icon
 - Expected behavior:
-  - Bash and Zsh display an icon in its own bracketed segment immediately after the username, only on the first prompt after initialization. All later prompts hide the entire status segment, including its brackets and separator, regardless of health.
-  - Green `●` means Docker answered `GET /_ping` successfully with body `OK`. Red `●` means unavailable (including missing storage/socket, failed HTTP response, or timeout). The first prompt always shows the result, including gray `?` if the check cannot run.
-  - Always checks the `default` profile at `${COLIMA_HOME:-$HOME/.colima}/default/docker.sock`, ignoring `COLIMA_PROFILE` and the current Docker context.
-  - Shell initialization waits for the first curl health check, with a one-second timeout. If the result expires or storage changes during the rest of startup, the first prompt waits for a fresh check with the same timeout. Probe failures allow startup to continue with a red icon; missing curl shows gray `?` on the first prompt.
-  - Later prompt activity does not trigger further health checks. Re-sourcing the prompt module starts a new first-prompt display.
-  - External storage is accessed only by the health-check worker during initialization or a first-prompt refresh. Changing `COLIMA_HOME` before the first prompt invalidates the old result.
+  - Bash and Zsh launch a detached background Docker check during initialization. Startup and prompt rendering never wait for the probe.
+  - The status segment stays hidden while the result is pending. The first prompt rendered after completion displays the icon immediately after the username; all subsequent prompts hide the segment, brackets, and separator. An already displayed prompt is not redrawn when the check finishes.
+  - Green `●` means Docker answered `GET /_ping` successfully with body `OK`. Red `●` means unavailable (including missing storage/socket, failed HTTP response, or timeout). Gray `?` means a completed check could not run because curl is missing.
+  - Always checks the `default` profile at `${COLIMA_HOME:-$HOME/.colima}/default/docker.sock`, ignoring `COLIMA_PROFILE` and the current Docker context. Curl has a one-second timeout and bypasses HTTP proxies.
+  - Reuses the completed startup result even if the rest of startup takes over five seconds. Changing `COLIMA_HOME` before display invalidates the old result and schedules a background check for the new storage. A cache failure never triggers a synchronous fallback during startup or prompt rendering.
+  - Once a result has been displayed, later prompts do not trigger checks. Re-sourcing the module starts another background check if its cached result has expired and enables one more status display.
+  - External storage is accessed only by the background worker during normal startup/prompt operation.
 - Output pattern:
-  - Prompt contains `[<username>]-[<icon>]-[<time>]` on the first prompt and `[<username>]-[<time>]` on all later prompts; worker output is suppressed.
+  - Prompt contains `[<username>]-[<icon>]-[<time>]` once the result is available, and `[<username>]-[<time>]` while pending and after the result has been displayed; worker output is suppressed.
   - Existing prompt colors, hooks, command-failure marker, and cat icon remain available.
 - Side effects:
   - Maintains atomic results in a private directory under local `/tmp`, removed at shell exit.
 - Manual verification:
-  - Open Bash/Zsh and confirm the first prompt shows the appropriate icon, even when remaining startup takes over five seconds. Check an inaccessible `COLIMA_HOME` and confirm startup continues with a red icon. Verify green, red, and gray `?` boxes disappear on the second prompt and remain hidden after five seconds, with no further health probes. Re-source the prompt module and verify the box appears once again.
+  - Open Bash/Zsh with a delayed probe and confirm the prompt appears before the probe completes, without a status segment. After completion, press Enter and verify the result appears once, then disappears on subsequent prompts. Verify a completed result is reused after slow startup without another probe.
 
 ## 4) User-Facing Function Contracts
 
@@ -338,21 +339,24 @@
 ### `shell/colima-fix.sh`
 - Expected behavior:
   - Accepts no arguments or `--help`; rejects other arguments.
-  - Requires `colima`, `curl`, and readable `${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml`; checks storage again before startup and refuses unavailable storage/configuration without creating directories.
-  - Runs `colima --profile default stop`, `colima --profile default stop --force`, then `colima --profile default start`. Both stop failures are reported but do not prevent later recovery steps.
-  - Ignores `COLIMA_PROFILE`. Preserves upstream diagnostics; after startup, requires a successful Docker `GET /_ping` response with body `OK`, using the profile socket and a one-second timeout.
+  - Requires `colima`, `curl`, `python3`, `ps`, and readable `${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml`; checks storage again before startup and refuses unavailable storage/configuration without creating directories.
+  - Runs `colima --profile default stop`, `colima --profile default stop --force`, SSH cleanup, then `colima --profile default start`. Both stop failures are reported but do not prevent later recovery steps unless the default profile host agent is still running.
+  - Before startup, `shell/colima-health.py` sends TERM only to current-user SSH masters whose full process title exactly matches this storage directory’s `_lima/colima/ssh.sock [mux]`. It rechecks identity before signaling, waits up to five seconds for all matching masters to exit, and refuses startup if cleanup fails. No control socket is required, and no new master is started before old masters finish exiting.
+  - Ignores `COLIMA_PROFILE`. Preserves upstream diagnostics; after startup, requires a successful Docker `GET /_ping` response with body `OK`, using the profile socket with five attempts, a one-second timeout per attempt, and one-second retry delays. Local socket probes bypass HTTP proxies.
+  - Reads running containers from Docker `GET /containers/json` (three-second timeout), then verifies published TCP ports by container port: PostgreSQL 5432 via SSL negotiation (`S`/`N`), Valkey/Redis 6379 via PING (`PONG` or an authentication-required response), and LocalStack 4566 via HTTP 200 JSON containing `services` at `/_localstack/health`. Host ports are discovered, including remapped ports such as 15432 and 16379. Wildcard bindings are checked through loopback. Each service gets five attempts with one-second socket timeouts and retry delays; an accepting-but-silent tunnel fails.
+  - Reports when no supported published services are running. Other protocols and unpublished services are not checked. Protocol responses establish forwarding, not authenticated database queries, Prisma connectivity, or individual LocalStack service readiness.
   - Ctrl+C cancels remaining recovery steps. Does not delete data, edit configuration, or repair disks.
 - Output pattern:
   - Help begins `Usage: colima-fix [--help]`.
   - Progress begins `colima-fix:`; successful recovery contains `default profile recovered; Docker is responding`.
-  - Failures identify unsupported arguments, missing commands, unavailable configuration/storage, stop failures, or failed Docker health check.
+  - Failures identify unsupported arguments, missing commands, unavailable configuration/storage, stop failures, incomplete SSH cleanup, failed Docker health check, port-discovery errors, or unresponsive supported service forwards.
 - Exit behavior:
   - `0` for help or verified recovery; `2` for unsupported arguments; `127` for missing dependencies.
-  - Returns the startup command's failure status, or `1` for unavailable storage/unhealthy Docker. Cancellation returns `130` (INT) or `143` (TERM).
+  - Returns the startup command's failure status, or `1` for unavailable storage, incomplete SSH cleanup, unhealthy Docker, or failed service verification. Cancellation returns `130` (INT) or `143` (TERM).
 - Side effects:
-  - Stops and restarts the default VM, interrupting its running workloads. Colima performs its normal startup/stop operations using the existing configuration.
+  - Stops and restarts the default VM, interrupting its running workloads, and terminates matching leftover SSH masters after shutdown. Colima recreates its normal forwards during startup using the existing configuration; the script does not hard-code SSH forwarding rules or change other profiles.
 - Manual verification:
-  - `shell/colima-fix.sh --help`; with temporary `colima`/`curl` stubs, verify order, continuing after stop failures, and refusing startup/health failures.
+  - `shell/colima-fix.sh --help`; with temporary `colima`/`curl`/`ps` stubs, verify order, continuing after stop failures, and refusing cleanup/startup/health failures. Use connected socket fixtures to verify service responses and rejection of silent peers. For a live check, verify the first prompt in Bash/Zsh and probe supported published services; a real recovery interrupts the default VM.
 
 ### `tests/run.sh`
 - Expected behavior:
@@ -427,6 +431,7 @@ Contracts in this document are grounded in:
 - `shell/functions/lstype.sh`
 - `shell/functions/gdc.sh`
 - `shell/colima-fix.sh`
+- `shell/colima-health.py`
 - `shell/rc/01-user-context.sh`
 - `shell/rc/05-pyenv.sh`
 - `shell/rc/12-safety-keys.sh`

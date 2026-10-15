@@ -1,6 +1,6 @@
 # shell/rc/50-prompt.sh
 
-# The initial check waits for Docker; only the first prompt displays its result.
+# Check Docker in the background; display the completed result on one prompt.
 _shellrc_colima_cleanup() {
   if [ -n "${_SHELLRC_COLIMA_PID-}" ]; then
     kill "$_SHELLRC_COLIMA_PID" 2>/dev/null || true
@@ -9,36 +9,56 @@ _shellrc_colima_cleanup() {
   unset _SHELLRC_COLIMA_CACHE _SHELLRC_COLIMA_PID
 }
 
+# /** Probe Docker and retain the result even if the cache cannot be written.
+#  * @param $1 Cache directory (empty disables persistence).
+#  * @param $2 Colima storage directory.
+#  * @param $3 Cache generation.
+#  * @returns Probe state through the prompt globals.
+#  */
 _shellrc_colima_worker() {
   local cache="$1" storage="$2" generation="$3" state=unavailable response
   if ! command -v curl >/dev/null 2>&1; then
     state=unknown
-  elif response="$(curl --silent --fail --max-time 1 --unix-socket "$storage/default/docker.sock" http://localhost/_ping)" && [ "$response" = OK ]; then
+  elif response="$(curl --noproxy '*' --silent --fail --max-time 1 --unix-socket "$storage/default/docker.sock" http://localhost/_ping)" && [ "$response" = OK ]; then
     state=healthy
   fi
+  case "$state" in
+    healthy) _SHELLRC_COLIMA_COLOR=46; _SHELLRC_COLIMA_ICON='●' ;;
+    unavailable) _SHELLRC_COLIMA_COLOR=196; _SHELLRC_COLIMA_ICON='●' ;;
+    *) _SHELLRC_COLIMA_COLOR=244; _SHELLRC_COLIMA_ICON='?' ;;
+  esac
+  [ -n "$cache" ] || return 0
   printf '%s %s\n' "$SECONDS" "$state" >"$cache/result.$generation.tmp" &&
     mv -f -- "$cache/result.$generation.tmp" "$cache/result.$generation"
 }
 
+# /** Refresh status without waiting for Docker during startup or prompt rendering.
+#  * @param $1 Optional --sync or --prompt mode.
+#  * @returns Always succeeds without changing the preceding command's status.
+#  */
 _shellrc_colima_update() {
   [ -z "${ZSH_VERSION-}" ] || setopt local_options no_monitor no_notify
   if [ "${1-}" = --prompt ]; then
     if [ "${_SHELLRC_COLIMA_FIRST_PROMPT-}" = 1 ]; then
-      unset _SHELLRC_COLIMA_FIRST_PROMPT
-      _shellrc_colima_update --sync
-      # The first prompt must report unknown checks too.
-      _SHELLRC_COLIMA_VISIBLE="$_SHELLRC_COLIMA_ICON"
+      _shellrc_colima_update --pending
+      if [ "${_SHELLRC_COLIMA_READY-}" = 1 ]; then
+        unset _SHELLRC_COLIMA_FIRST_PROMPT
+        _SHELLRC_COLIMA_VISIBLE="$_SHELLRC_COLIMA_ICON"
+      fi
     else
       unset _SHELLRC_COLIMA_VISIBLE
     fi
     return 0
   fi
-  local storage="${COLIMA_HOME:-$HOME/.colima}" checked state
+  local storage="${COLIMA_HOME:-$HOME/.colima}" checked state fresh=0
   _SHELLRC_COLIMA_COLOR=244
   _SHELLRC_COLIMA_ICON='?'
-  unset _SHELLRC_COLIMA_VISIBLE
+  unset _SHELLRC_COLIMA_VISIBLE _SHELLRC_COLIMA_READY
   if [ -z "${_SHELLRC_COLIMA_CACHE-}" ]; then
-    _SHELLRC_COLIMA_CACHE="$(mktemp -d /tmp/shellrc-colima.XXXXXX)" || return 0
+    _SHELLRC_COLIMA_CACHE="$(mktemp -d /tmp/shellrc-colima.XXXXXX)" || {
+      [ "${1-}" != --sync ] || _shellrc_colima_worker '' "$storage" 0 >/dev/null 2>&1
+      return 0
+    }
     _SHELLRC_COLIMA_GENERATION=0
     _SHELLRC_COLIMA_LAST=-5
   fi
@@ -48,25 +68,35 @@ _shellrc_colima_update() {
     _SHELLRC_COLIMA_LAST=-5
   fi
   if [ -r "$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION" ]; then
-    read -r checked state <"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
-    if [ "$(( SECONDS - checked ))" -lt 5 ]; then
+    IFS=' ' read -r checked state <"$_SHELLRC_COLIMA_CACHE/result.$_SHELLRC_COLIMA_GENERATION"
+    if [ "${1-}" = --pending ] || [ "$(( SECONDS - checked ))" -lt 5 ]; then
       case "$state" in
-        healthy) _SHELLRC_COLIMA_COLOR=46; _SHELLRC_COLIMA_ICON='●' ;;
-        unavailable) _SHELLRC_COLIMA_COLOR=196; _SHELLRC_COLIMA_ICON='●' ;;
+        healthy) _SHELLRC_COLIMA_COLOR=46; _SHELLRC_COLIMA_ICON='●'; fresh=1 ;;
+        unavailable) _SHELLRC_COLIMA_COLOR=196; _SHELLRC_COLIMA_ICON='●'; fresh=1 ;;
+        unknown) fresh=1 ;;
       esac
     fi
   fi
+  [ "$fresh" -eq 0 ] || _SHELLRC_COLIMA_READY=1
   [ "$_SHELLRC_COLIMA_ICON" = '?' ] || _SHELLRC_COLIMA_VISIBLE="$_SHELLRC_COLIMA_ICON"
+  # The startup result is shown once, even if the rest of startup took longer.
+  if [ "${1-}" = --pending ] && [ "$fresh" -eq 1 ]; then
+    return 0
+  fi
+  if [ "${1-}" = --sync ]; then
+    if [ "$fresh" -eq 0 ]; then
+      # An older asynchronous worker must not overwrite this result.
+      _SHELLRC_COLIMA_GENERATION=$(( _SHELLRC_COLIMA_GENERATION + 1 ))
+      _shellrc_colima_worker "$_SHELLRC_COLIMA_CACHE" "$storage" "$_SHELLRC_COLIMA_GENERATION" >/dev/null 2>&1 || true
+      _SHELLRC_COLIMA_LAST=$SECONDS
+    fi
+    return 0
+  fi
   if [ -n "${_SHELLRC_COLIMA_PID-}" ] && kill -0 "$_SHELLRC_COLIMA_PID" 2>/dev/null; then
     return 0
   fi
   if [ "$(( SECONDS - _SHELLRC_COLIMA_LAST ))" -ge 5 ]; then
     _SHELLRC_COLIMA_LAST=$SECONDS
-    if [ "${1-}" = --sync ]; then
-      _shellrc_colima_worker "$_SHELLRC_COLIMA_CACHE" "$storage" "$_SHELLRC_COLIMA_GENERATION" >/dev/null 2>&1 || true
-      _shellrc_colima_update
-      return 0
-    fi
     {
       if [ -n "${ZSH_VERSION-}" ]; then
         # Keep Zsh's detached-job syntax out of the shared Bash parser.
@@ -286,7 +316,7 @@ precmd() {
 
 ZSH
 )"
-  _shellrc_colima_update --sync
+  _shellrc_colima_update
   _SHELLRC_COLIMA_FIRST_PROMPT=1
   return 0
 fi
@@ -339,6 +369,6 @@ _shellrc_colima_cleanup" EXIT
   firstLine=$firstLineChar$xMark$virtualEnv$username$colima$time$ip$gitBranch$python$node$npm$workDir
   secondLine=$new_line$white$secondLineChar$usrPrompt"\[\e[0;33m\]🐈"$white
   PS1=$firstLine$secondLine
-  _shellrc_colima_update --sync
+  _shellrc_colima_update
   _SHELLRC_COLIMA_FIRST_PROMPT=1
 fi
