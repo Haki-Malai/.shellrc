@@ -1,0 +1,12 @@
+Source: https://github.com/softaworks/agent-toolkit/tree/3027f20f3181758385a1bb8c022d4041dfb4de84/skills/agent-md-refactor
+Revision: 3027f20f3181758385a1bb8c022d4041dfb4de84
+License: MIT; upstream repository LICENSE included alongside the skill.
+SKILL.md and README.md are unmodified upstream copies.
+
+Selection: Context7 MCP searches compared context-engineering and agent-skills
+collections. A supplemental web search located this more focused AGENTS.md
+refactoring skill; its original GitHub source was inspected before installation.
+
+Scope: This is an optional instruction-maintenance skill, not global policy.
+Existing user instructions take precedence over its generic recommendations,
+including its file-count targets, deletion examples, and README commit advice.
