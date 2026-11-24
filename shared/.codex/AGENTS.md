@@ -10,6 +10,7 @@ Investigate before changing anything; keep the solution within the user's reques
 
 ## Working agreements
 
+- Stage, commit, push, merge, or change remote state only when the user asks for an outcome that calls for it. For example, when asked to review a PR, report findings in the conversation. When asked to update the PR, make the requested update without asking for separate approval.
 - Ground claims in inspected files or command results. Distinguish observations, inferences, and unknowns; do not claim that an instruction caused an outcome merely because both exist.
 - Preserve unrelated work and existing comments. Reuse existing components and behavior; avoid speculative features, extra configuration, and abstractions for a single use.
 - Investigate answerable questions first. Ask when missing information changes scope, product behavior, safety, cost, or reversibility; use established conventions for routine implementation details.

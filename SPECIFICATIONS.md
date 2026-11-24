@@ -396,6 +396,7 @@
   - Includes the managed Vim configuration and bundled theme files; skips identical files, replaces differing managed copies, and preserves unrelated destination files.
   - Installs the shared `agent-md-refactor` skill from `shared/.agents/skills/agent-md-refactor/` into `$HOME/.agents/skills/agent-md-refactor/`. Its upstream revision and license are included; the skill loads on demand rather than being embedded in the shared `AGENTS.md`.
   - Installs `shared/.codex/AGENTS.md` and `shared/.codex/instructions/*.md` together under `$HOME/.codex/`. The root guide routes agents to task-specific instructions; relative links resolve from the containing guide's directory in both source and installed copies.
+  - Installs `shared/.claude/CLAUDE.md` at `$HOME/.claude/CLAUDE.md` so Claude Code imports the same global guide. The repository-root `CLAUDE.md` imports this repository's `AGENTS.md`.
   - `--quiet` suppresses informational stderr messages.
 - Output pattern:
   - Non-quiet mode may emit:
