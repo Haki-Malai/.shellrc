@@ -11,7 +11,6 @@ This repository manages shared dotfiles and Bash/Zsh commands. These instruction
 ## Before changing files
 
 - Read [editing and validation](shared/.codex/instructions/workflow.md) and [Git and remote work](shared/.codex/instructions/git-and-remote.md). Preserve existing work and summarize the required Git preflight before editing tracked files.
-- Staging, commits, pushes, merges, and remote writes require explicit user authorization. Reuse it within scope; ask again only for the risk or scope changes described in the remote guide.
 - Read the configured hooks in `hooks/pre-commit` and `hooks/pre-push`; follow them without bypassing their checks.
 - Keep changes small and direct. Update `SPECIFICATIONS.md` in the same change when command behavior or output changes.
 

@@ -7,15 +7,12 @@ Investigate before changing anything; keep the solution within the user's reques
 - In `.shellrc`, `shared/.codex/AGENTS.md` and its linked instructions are the canonical shared source, installed under `$HOME/.codex/` by shared-file sync. Edit the source, not the generated home copy.
 - Common/global behavior and references to `.codex/AGENTS.md` target that source. Repository-specific behavior belongs in the nearest applicable repository `AGENTS.md`. An explicit path wins; ask if the intended scope remains unclear after inspection.
 - Follow system/developer instructions, then explicit user instructions, applicable repository guidance, and these shared defaults. Resolve conflicts by that precedence; ask only about unresolved conflicts that affect the task.
-- Repository workflows describe how to publish; they do not substitute for the user's explicit authorization to stage, commit, push, merge, or make remote changes.
 
 ## Working agreements
 
 - Ground claims in inspected files or command results. Distinguish observations, inferences, and unknowns; do not claim that an instruction caused an outcome merely because both exist.
 - Preserve unrelated work and existing comments. Reuse existing components and behavior; avoid speculative features, extra configuration, and abstractions for a single use.
 - Investigate answerable questions first. Ask when missing information changes scope, product behavior, safety, cost, or reversibility; use established conventions for routine implementation details.
-- Reuse explicit authorization within its scope across turns. Read-only investigation needs no additional confirmation. Ask before destructive or hard-to-reverse actions, security/access changes, substantial unexpected costs, or work outside the authorized scope.
-- Browser opening/inspection/automation and frontend dev-server startup require an explicit user request covering that activity. Once given, reuse it for the same task; a URL or ambient browser state alone is not authorization.
 - Follow applicable repository guidance and hooks. Apply repository workflows to repository work, not unrelated personal or desktop tasks merely opened in that directory.
 
 ## Read when relevant

@@ -5,10 +5,10 @@ Read before editing code or documentation. Read-only explanations do not require
 ## Before editing
 
 - Inspect the relevant implementation, callers, tests, and applicable instructions. Use the Git preflight in [Git and remote work](git-and-remote.md) before edits.
-- State the intended change, expected files, and verification. One sentence is enough for a small edit; use 3–6 steps for work with multiple dependencies or meaningful risk. A plan is not a request for permission to do already-authorized work.
+- State the intended change, expected files, and verification. One sentence is enough for a small edit; use 3–6 steps for work with multiple dependencies or meaningful risk.
 - For UI/layout work, distinguish presentation changes from changes to saving, rerunning, validation, persistence, or other product behavior. Preserve the existing behavior unless the user requests a change; surface a necessary behavior change before implementing it.
 - When a design needs new persisted state, configuration, compatibility logic, or a helper script, first check the existing owner and explain why it cannot satisfy the requirement. Prefer direct commands for one-off work; add a maintained script only for a recurring workflow that benefits from it.
-- Ask a focused question only when unresolved information affects the result or authorization. Continue independent investigation while waiting; do not treat an unanswered question as agreement.
+- Ask a focused question only when unresolved information affects the result. Continue independent investigation while waiting.
 
 ## During editing
 
@@ -22,5 +22,5 @@ Read before editing code or documentation. Read-only explanations do not require
 
 - Run the relevant local checks and required repository checks. Test changed behavior; avoid tests that only restate the implementation or unrelated suites without a reason.
 - After a failure, inspect the actual failing boundary and environment before adding more code. Distinguish local test success from deployed behavior and an end-to-end result.
-- Broaden or repeat checks when dependencies, new changes, or unresolved failures justify it. Ask before unexpectedly heavy or costly checks; reuse prior authorization for checks already in scope.
+- Broaden or repeat checks when dependencies, new changes, or unresolved failures justify it.
 - Run a targeted diff for touched files and check for accidental edits. Summarize what changed, why, what passed, and any remaining verification gap using [Reporting](reporting.md).
